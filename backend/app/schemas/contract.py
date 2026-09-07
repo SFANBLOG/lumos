@@ -65,3 +65,37 @@ class ContractSubmitResponse(BaseModel):
     status: ContractStatus = Field(default=ContractStatus.ANALYZING)
     message: str = Field(default="合同已受理, 正在进行 AI 风险排查…")
     stream_url: str = Field(description="SSE 流式分析结果订阅地址")
+
+
+class ContractListItem(BaseModel):
+    """合同列表项 (含正文预览)."""
+
+    id: str
+    source: ContractSource
+    status: ContractStatus
+    char_count: int | None
+    created_at: datetime
+    preview: str = Field(default="", description="正文前 80 字预览")
+
+
+class ContractListResponse(BaseModel):
+    """合同记录分页列表."""
+
+    total: int
+    page: int
+    page_size: int
+    items: list[ContractListItem]
+
+
+class ContractStatsResponse(BaseModel):
+    """看板统计汇总."""
+
+    total: int = Field(description="合同分析总量")
+    completed: int
+    analyzing: int
+    failed: int
+    pending: int
+    avg_overall_score: float | None = Field(description="平均安全分 (0-100, 无数据为 null)")
+    high_risk_contracts: int = Field(description="高危合同数 (overall_level=high)")
+    level_counts: dict[str, int] = Field(description="风险条目按等级计数 (high/medium/low/safe)")
+    recent: list[ContractListItem] = Field(description="最近 5 条合同记录")
