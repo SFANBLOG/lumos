@@ -320,8 +320,9 @@ def main() -> None:
             text = build_contract(form_title, form_note, company, position, location, employee, (fkey, fsev))
             extra_lines = "\n".join(
                 (f"【附加风险条款】{pn}："
-                 + (CLAUSE_FUNCS[ck](sv) if ck != 'job'
-                    else CLAUSE_FUNCS['job'](sv, position, location)))
+                 + (CLAUSE_FUNCS[ck](sv, position, location) if ck == 'job'
+                    else CLAUSE_FUNCS[ck](sv, location) if ck == 'jurisdiction'
+                    else CLAUSE_FUNCS[ck](sv)))
                 for pn, (ck, sv) in extra
             )
             text = text.replace("十二、其他", f"十二、其他\n{extra_lines}")

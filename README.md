@@ -162,7 +162,7 @@ lumos/
 │   │   ├── skills/              # 可复用技能
 │   │   └── middleware/          # 中间件
 │   └── pyproject.toml
-├── 📂 data/                     # 测试数据（合同样本）
+├── 📂 data/                     # 测试数据（100 份中文合同样本，按 风险区/坑点 二级分类）
 └── 📂 public/                   # 静态资源
 ```
 
