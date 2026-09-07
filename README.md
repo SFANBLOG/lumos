@@ -3,10 +3,6 @@
 </p>
 
 <p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge&logo=apache" alt="License"></a>
-</p>
-
-<p align="center">
   <a href="#项目背景">项目背景</a> •
   <a href="#核心功能">核心功能</a> •
   <a href="#技术架构">技术架构</a> •
