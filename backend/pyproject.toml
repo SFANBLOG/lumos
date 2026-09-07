@@ -38,6 +38,7 @@ dependencies = [
     # ---- Auth ----
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.0.0",
+    "email-validator>=2.0.0",  # pydantic EmailStr (注册表单)
 
     # ---- Configuration ----
     "pydantic-settings>=2.7.0",
