@@ -18,18 +18,35 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'Home',
-      component: () => import('@/views/HomeView.vue'),
-    },
-    {
-      path: '/analysis',
-      name: 'Analysis',
-      component: () => import('@/views/AnalysisView.vue'),
-    },
-    {
-      path: '/mcp',
-      name: 'MCP',
-      component: () => import('@/views/MCPView.vue'),
+      name: 'App',
+      component: () => import('@/layouts/AppLayout.vue'),
+      redirect: '/dashboard',
+      children: [
+        {
+          path: 'dashboard',
+          name: 'Dashboard',
+          component: () => import('@/views/DashboardView.vue'),
+          meta: { title: '主看板' },
+        },
+        {
+          path: 'analysis',
+          name: 'Analysis',
+          component: () => import('@/views/AnalysisView.vue'),
+          meta: { title: '智能分析' },
+        },
+        {
+          path: 'reports',
+          name: 'Reports',
+          component: () => import('@/views/ReportsView.vue'),
+          meta: { title: '历史报告' },
+        },
+        {
+          path: 'mcp',
+          name: 'MCP',
+          component: () => import('@/views/MCPView.vue'),
+          meta: { title: 'MCP 工具' },
+        },
+      ],
     },
   ],
 })

@@ -56,6 +56,12 @@ def upload_file(
     bucket = bucket or settings.minio_bucket
     ensure_bucket(bucket)
 
+    # minio SDK put_object 需要可读流, 兼容直接传 bytes 的调用方
+    if isinstance(data, bytes):
+        import io
+
+        data = io.BytesIO(data)
+
     client.put_object(
         bucket,
         object_name,

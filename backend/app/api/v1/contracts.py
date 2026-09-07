@@ -222,6 +222,14 @@ async def stream_analysis(
                 raw_text=contract.raw_text,
                 session=session,
             ):
+                # 在推送 complete 前先落库: 客户端收到后可能立即断开,
+                # 若之后再提交状态, 生成器会被取消导致状态永远停留在 analyzing
+                if event.event == SSEEventType.COMPLETE:
+                    contract.status = ContractStatus.COMPLETED
+                    contract.updated_at = datetime.now(UTC)
+                    session.add(contract)
+                    await session.commit()
+
                 # 格式化为 SSE 协议
                 data = json.dumps(event.data, ensure_ascii=False)
                 yield f"event: {event.event.value}\ndata: {data}\n\n"
@@ -229,11 +237,24 @@ async def stream_analysis(
                 # 给前端一点渲染时间
                 await asyncio.sleep(0.1)
 
-            # 更新合同状态为已完成
-            contract.status = ContractStatus.COMPLETED
-            contract.updated_at = datetime.now(UTC)
-            session.add(contract)
-            await session.commit()
+        except asyncio.CancelledError:
+            # 客户端提前断开 (如中途离开分析页): 数据已持久化则视为完成, 否则标记失败
+            logger.warning(f"SSE 连接中断 | 合同ID: {contract_id}")
+            try:
+                persisted = (
+                    await session.execute(
+                        select(AnalysisResult).where(AnalysisResult.contract_id == contract_id)
+                    )
+                ).scalar_one_or_none()
+                contract.status = (
+                    ContractStatus.COMPLETED if persisted else ContractStatus.FAILED
+                )
+                contract.updated_at = datetime.now(UTC)
+                session.add(contract)
+                await session.commit()
+            except Exception:
+                logger.exception("SSE 连接中断后状态更新失败")
+            raise
 
         except Exception as e:
             logger.exception(f"SSE 流异常 | 合同ID: {contract_id}")

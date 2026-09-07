@@ -10,6 +10,8 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
+from sqlalchemy import Column, Text
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, SQLModel
 
 
@@ -45,7 +47,14 @@ class Contract(SQLModel, table=True):
     )
 
     # ---- 合同内容 ----
-    raw_text: str = Field(description="OCR/上传后的原始文本（已脱敏）")
+    raw_text: str = Field(
+        sa_column=Column(
+            "raw_text",
+            MEDIUMTEXT().with_variant(Text, "sqlite"),
+            nullable=False,
+        ),
+        description="OCR/上传后的原始文本（已脱敏）",
+    )
     source: ContractSource = Field(
         default=ContractSource.TEXT_PASTE,
         description="合同来源方式",

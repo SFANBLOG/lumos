@@ -10,7 +10,12 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
+from sqlalchemy import Column, Text
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, Relationship, SQLModel
+
+# 长文本列统一用 MEDIUMTEXT (MySQL) / TEXT (sqlite), 避免 str 默认 VARCHAR(255) 截断
+MEDIUM_TEXT = MEDIUMTEXT().with_variant(Text, "sqlite")
 
 
 class RiskLevel(str, Enum):
@@ -62,7 +67,10 @@ class AnalysisResult(SQLModel, table=True):
         default=RiskLevel.MEDIUM,
         description="整体风险等级",
     )
-    summary: str = Field(default="", description="一句话总结")
+    summary: str = Field(
+        sa_column=Column("summary", MEDIUM_TEXT, nullable=False),
+        description="一句话总结",
+    )
 
     # ---- 时间 ----
     created_at: datetime = Field(
@@ -90,11 +98,30 @@ class RiskItem(SQLModel, table=True):
     # ---- 风险详情 ----
     category: RiskCategory = Field(description="坑点分类")
     level: RiskLevel = Field(description="风险等级")
-    title: str = Field(description="风险标题 (说人话)")
-    original_clause: str = Field(default="", description="原始合同条文")
-    explanation: str = Field(default="", description="大白话解读")
-    legal_basis: str = Field(default="", description="法律依据")
-    negotiation_tip: str = Field(default="", description="谈判话术建议")
+    title: str = Field(
+        sa_column=Column("title", MEDIUM_TEXT, nullable=False),
+        description="风险标题 (说人话)",
+    )
+    original_clause: str = Field(
+        default="",
+        sa_column=Column("original_clause", MEDIUM_TEXT, nullable=False),
+        description="原始合同条文",
+    )
+    explanation: str = Field(
+        default="",
+        sa_column=Column("explanation", MEDIUM_TEXT, nullable=False),
+        description="大白话解读",
+    )
+    legal_basis: str = Field(
+        default="",
+        sa_column=Column("legal_basis", MEDIUM_TEXT, nullable=False),
+        description="法律依据",
+    )
+    negotiation_tip: str = Field(
+        default="",
+        sa_column=Column("negotiation_tip", MEDIUM_TEXT, nullable=False),
+        description="谈判话术建议",
+    )
     score: int = Field(default=0, ge=0, le=100, description="单项评分")
 
     # ---- 排序 ----
