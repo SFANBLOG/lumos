@@ -27,6 +27,8 @@ dependencies = [
     "chromadb>=0.6.0",
     "pymilvus>=2.4.0",
     "sentence-transformers>=3.0.0",
+    "pypdf>=5.0.0",
+    "python-docx>=1.1.0",
 
     # ---- Database ----
     "sqlmodel>=0.0.22",
