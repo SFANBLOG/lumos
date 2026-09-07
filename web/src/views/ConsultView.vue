@@ -1,25 +1,10 @@
 <template>
   <div class="consult">
     <el-card shadow="never" class="chat-card">
-      <!-- ── 顶栏: 会话切换 / 关联报告 ─────────────────── -->
+      <!-- ── 顶栏: 关联报告 ─────────────────── -->
+      <!-- 历史会话已迁至左侧「智能咨询」子菜单; 顶栏仅保留「关联报告」与「新对话」 -->
       <template #header>
         <div class="toolbar">
-          <el-select
-            v-model="sessionSel"
-            class="session-sel"
-            placeholder="历史会话"
-            filterable
-            clearable
-            :disabled="answering"
-            @change="onSessionChange"
-          >
-            <el-option
-              v-for="s in sessions"
-              :key="s.id"
-              :value="s.id"
-              :label="`${s.title} · ${s.message_count} 条`"
-            />
-          </el-select>
           <el-button :disabled="answering" @click="startNewChat">新对话</el-button>
           <span class="toolbar-sep" />
           <span class="toolbar-label">关联报告</span>
@@ -39,6 +24,9 @@
             />
           </el-select>
           <span v-if="contractSel" class="hint">问答将结合该报告的已分析风险项</span>
+          <span v-else-if="currentSessionTitle" class="current-session">
+            当前会话：{{ currentSessionTitle }}
+          </span>
         </div>
       </template>
 
@@ -138,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ChatLineRound } from '@element-plus/icons-vue'
@@ -148,14 +136,15 @@ import {
   consultApi,
   type ConsultMessage,
   type ConsultRef,
-  type ConsultSession,
 } from '@/api/consult'
 import { formatTime } from '@/utils/contractMeta'
+import { useConsultStore } from '@/stores/consult'
 
 const route = useRoute()
 const router = useRouter()
+const consult = useConsultStore()
 
-const sessions = ref<ConsultSession[]>([])
+// 当前会话 ID: 以 URL ?s=xxx 为唯一真相, 由 watcher 与侧栏点击共同维护
 const sessionSel = ref<string | null>(null)
 const contracts = ref<ContractListItem[]>([])
 const contractSel = ref<string | null>(null)
@@ -187,15 +176,6 @@ const scrollDown = async () => {
 }
 
 // ── 数据加载 ────────────────────────────────────────
-const fetchSessions = async () => {
-  try {
-    const { data } = await consultApi.sessions()
-    sessions.value = data.items
-  } catch (e: any) {
-    ElMessage.error(e.response?.data?.detail || '会话列表加载失败')
-  }
-}
-
 const fetchContracts = async () => {
   try {
     const { data } = await contractApi.list({ status: 'completed', page_size: 100 })
@@ -205,11 +185,12 @@ const fetchContracts = async () => {
   }
 }
 
+/** 按 ID 加载一次会话的完整消息; 找不到(可能尚未在列表中)也直接拉接口 */
 const loadMessages = async (sessionId: string) => {
   try {
     const { data } = await consultApi.messages(sessionId)
     messages.value = data
-    const cur = sessions.value.find((s) => s.id === sessionId)
+    const cur = consult.sessions.find((s) => s.id === sessionId)
     contractSel.value = cur?.contract_id ?? null
     await scrollDown()
   } catch (e: any) {
@@ -217,20 +198,19 @@ const loadMessages = async (sessionId: string) => {
   }
 }
 
-// ── 会话切换 ────────────────────────────────────────
-const onSessionChange = (val: string | null) => {
-  if (!val) {
-    startNewChat()
-    return
-  }
+// ── 会话切换: 由 URL ?s= 驱动 ──────────────────────
+// 标志: 防止在「自己刚更新 URL」时 watcher 反向触发重置/重新拉取
+let suppressWatcher = false
+
+const switchToSession = async (id: string) => {
   answering.value = false
   abortCtrl?.abort()
   steps.value = []
-  sessionSel.value = val
-  loadMessages(val)
+  sessionSel.value = id
+  await loadMessages(id)
 }
 
-const startNewChat = () => {
+const resetChat = () => {
   answering.value = false
   abortCtrl?.abort()
   abortCtrl = null
@@ -239,10 +219,31 @@ const startNewChat = () => {
   contractSel.value = null
   messages.value = []
   draft.value = ''
-  const q = { ...route.query }
-  delete q.s
-  router.replace({ query: q })
 }
+
+const startNewChat = () => {
+  // 顶部「新对话」按钮: 跳到 /consult 干净地址, 由 watcher 触发重置
+  router.push({ path: '/consult' })
+}
+
+// 监听 URL 中的会话 ID, 侧栏切换会通过此机制反映到页面
+watch(
+  () => route.query.s,
+  async (s) => {
+    if (suppressWatcher) { suppressWatcher = false; return }
+    if (typeof s === 'string' && s) {
+      if (s !== sessionSel.value) await switchToSession(s)
+    } else {
+      if (sessionSel.value !== null || messages.value.length) resetChat()
+    }
+  }
+)
+
+/** 工具栏上显示的「当前会话」标题, 为空表示新对话 */
+const currentSessionTitle = computed(() => {
+  if (!sessionSel.value) return ''
+  return consult.sessions.find((s) => s.id === sessionSel.value)?.title || '历史会话'
+})
 
 // ── 发送与事件处理 ──────────────────────────────────
 const send = async () => {
@@ -285,8 +286,11 @@ const send = async () => {
 const handleEvent = (type: string, data: any) => {
   switch (type) {
     case 'session':
+      // 后端告知本轮属于哪个会话, 把 URL 同步过去(便于刷新/分享/侧栏高亮)
+      suppressWatcher = true
       sessionSel.value = data.session_id
-      fetchSessions()
+      router.replace({ path: '/consult', query: { s: data.session_id } })
+      consult.fetchSessions()
       break
     case 'step':
       steps.value.push(data.message)
@@ -305,7 +309,7 @@ const handleEvent = (type: string, data: any) => {
       break
     case 'complete':
       answering.value = false
-      fetchSessions()
+      consult.fetchSessions()
       break
     case 'error':
       answering.value = false
@@ -317,7 +321,7 @@ const handleEvent = (type: string, data: any) => {
         suggestions: null,
         created_at: '',
       })
-      fetchSessions()
+      consult.fetchSessions()
       scrollDown()
       break
   }
@@ -341,32 +345,11 @@ const renderContent = (s: string) =>
   s.replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#+\s*/gm, '')
 
 onMounted(async () => {
-  await Promise.all([fetchSessions(), fetchContracts()])
-  const q = route.query.s
-  if (typeof q === 'string' && q) {
-    sessionSel.value = q
-    if (sessions.value.some((s) => s.id === q)) {
-      await loadMessages(q)
-    } else {
-      // 不在首页列表里的旧会话, 直接按 ID 拉消息并占位展示
-      try {
-        const { data } = await consultApi.messages(q)
-        messages.value = data
-        sessions.value.unshift({
-          id: q,
-          title: '历史会话',
-          contract_id: null,
-          created_at: '',
-          updated_at: '',
-          message_count: data.length,
-        })
-      } catch {
-        ElMessage.warning('目标会话不存在或已删除')
-      }
-    }
-    const nextQ = { ...route.query }
-    delete nextQ.s
-    router.replace({ query: nextQ })
+  await Promise.all([consult.fetchSessions(), fetchContracts()])
+  // 初始会话: 如果 URL 带了 ?s=, 加载之; 否则保持「新对话」空状态
+  const s = route.query.s
+  if (typeof s === 'string' && s) {
+    await switchToSession(s)
   }
 })
 
@@ -396,9 +379,6 @@ onBeforeUnmount(() => abortCtrl?.abort())
   gap: 10px;
   flex-wrap: wrap;
 }
-.session-sel {
-  width: 230px;
-}
 .contract-sel {
   width: 280px;
 }
@@ -416,6 +396,14 @@ onBeforeUnmount(() => abortCtrl?.abort())
 .hint {
   font-size: 12px;
   color: #409eff;
+}
+.current-session {
+  font-size: 12px;
+  color: #909399;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .msg-box {
   flex: 1;

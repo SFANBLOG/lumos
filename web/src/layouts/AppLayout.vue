@@ -5,24 +5,46 @@
         <div class="logo-name">Lumos</div>
         <div class="logo-sub">契光鉴微</div>
       </div>
-      <el-menu :default-active="activeMenu" router class="side-menu">
-        <el-menu-item index="/dashboard">
+      <el-menu
+        :default-active="activeMenu"
+        :default-openeds="defaultOpeneds"
+        class="side-menu"
+      >
+        <el-menu-item index="/dashboard" @click="nav('/dashboard')">
           <el-icon><Odometer /></el-icon>
           <span>主看板</span>
         </el-menu-item>
-        <el-menu-item index="/analysis">
+        <el-menu-item index="/analysis" @click="nav('/analysis')">
           <el-icon><Document /></el-icon>
           <span>智能分析</span>
         </el-menu-item>
-        <el-menu-item index="/consult">
-          <el-icon><ChatLineRound /></el-icon>
-          <span>智能咨询</span>
-        </el-menu-item>
-        <el-menu-item index="/reports">
+
+        <!-- 智能咨询: 可展开, 下含「新对话」与历史会话子项 -->
+        <el-sub-menu index="consult">
+          <template #title>
+            <el-icon><ChatLineRound /></el-icon>
+            <span>智能咨询</span>
+          </template>
+          <el-menu-item index="/consult" @click="nav('/consult')">
+            <el-icon><Plus /></el-icon>
+            <span>新对话</span>
+          </el-menu-item>
+          <el-menu-item
+            v-for="s in consult.sessions"
+            :key="s.id"
+            :index="`/consult?s=${s.id}`"
+            @click="navSession(s.id)"
+          >
+            <el-icon><ChatLineSquare /></el-icon>
+            <span class="session-title" :title="s.title">{{ s.title || '未命名会话' }}</span>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <el-menu-item index="/reports" @click="nav('/reports')">
           <el-icon><Clock /></el-icon>
           <span>历史报告</span>
         </el-menu-item>
-        <el-menu-item index="/mcp">
+        <el-menu-item index="/mcp" @click="nav('/mcp')">
           <el-icon><MagicStick /></el-icon>
           <span>MCP 工具</span>
         </el-menu-item>
@@ -48,14 +70,45 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatLineRound, Clock, Document, MagicStick, Odometer, User } from '@element-plus/icons-vue'
+import {
+  ChatLineRound,
+  ChatLineSquare,
+  Clock,
+  Document,
+  MagicStick,
+  Odometer,
+  Plus,
+  User,
+} from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { useConsultStore } from '@/stores/consult'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const consult = useConsultStore()
 
-const activeMenu = computed(() => route.path)
+// 顶级菜单与子项的激活态完全由本计算属性驱动, 不依赖 el-menu 的 router 模式,
+// 避免 query 参数(/consult?s=xxx)无法被自动匹配为活动项的问题.
+const activeMenu = computed(() => {
+  if (route.path === '/consult' && route.query.s) {
+    return `/consult?s=${route.query.s}`
+  }
+  return route.path
+})
+
+// 进入 /consult 时自动展开「智能咨询」子菜单
+const defaultOpeneds = computed(() =>
+  route.path.startsWith('/consult') ? ['consult'] : []
+)
+
+const nav = (path: string) => {
+  if (route.path !== path) router.push(path)
+}
+
+const navSession = (id: string) => {
+  router.push({ path: '/consult', query: { s: id } })
+}
 
 const handleLogout = () => {
   auth.logout()
@@ -66,6 +119,10 @@ onMounted(() => {
   // 刷新页面后 token 仍在而用户信息为空时补拉一次
   if (auth.isLoggedIn() && !auth.user) {
     auth.fetchUser()
+  }
+  // 登录态下预取会话列表, 让侧栏「历史会话」子项即时可见
+  if (auth.isLoggedIn()) {
+    consult.fetchSessions()
   }
 })
 </script>
@@ -107,6 +164,7 @@ onMounted(() => {
   border-right: none;
   flex: 1;
   padding-top: 8px;
+  overflow-y: auto;
 }
 .side-menu .el-menu-item {
   margin: 2px 8px;
@@ -117,6 +175,24 @@ onMounted(() => {
   background: #ecf5ff;
   color: #409eff;
   font-weight: 500;
+}
+/* 子菜单内的项: 去掉外侧 8px 边距, 依靠 EP 自带的缩进对齐 */
+.side-menu .el-sub-menu .el-menu-item {
+  margin-left: 4px;
+  margin-right: 8px;
+}
+/* 智能咨询标题在子项激活时高亮 (EP 会自动加 is-active) */
+.side-menu .el-sub-menu.is-active > .el-sub-menu__title {
+  color: #409eff;
+}
+/* 历史会话子项: 标题过长省略, 鼠标悬停显示完整标题 */
+.session-title {
+  display: inline-block;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 .body {
   min-width: 0;
