@@ -345,6 +345,35 @@ def extract_pptx(data: bytes) -> tuple[str, bool]:
     return "\n".join(parts), False
 
 
+# ─── IMAGE (OCR) ───────────────────────────────────────────
+
+def extract_image(data: bytes) -> tuple[str, bool]:
+    """
+    图片 OCR 抽取文本 (合同拍照/扫描件).
+
+    依赖 Pillow + pytesseract + 系统 Tesseract (含 chi_sim/eng 语言包).
+    Tesseract 未安装或图片解码失败时抛 ServiceNotReadyError, 由路由转 503。
+    """
+    try:
+        from PIL import Image
+        import pytesseract
+    except ImportError as e:
+        raise ServiceNotReadyError("图片 OCR 组件未就绪, 请稍后重试") from e
+
+    try:
+        img = Image.open(io.BytesIO(data))
+    except Exception as e:
+        raise ServiceNotReadyError(f"图片解码失败: {e}") from e
+
+    # 转灰度提升小字识别率; Tesseract 缺失时 image_to_string 抛 TesseractNotFoundError
+    try:
+        text = pytesseract.image_to_string(img.convert("L"), lang="chi_sim+eng")
+    except Exception as e:
+        raise ServiceNotReadyError(f"OCR 引擎不可用: {e}") from e
+
+    return text, True
+
+
 # ─── 统一入口 ──────────────────────────────────────────────────
 
 
@@ -359,6 +388,12 @@ _EXTRACTORS: dict[str, object] = {
     "rtf": extract_rtf,
     "xlsx": extract_xlsx,
     "pptx": extract_pptx,
+    "png": extract_image,
+    "jpg": extract_image,
+    "jpeg": extract_image,
+    "gif": extract_image,
+    "webp": extract_image,
+    "bmp": extract_image,
 }
 
 

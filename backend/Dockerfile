@@ -20,6 +20,11 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 # ---- 阶段 2: 运行 ----
 FROM python:3.12-slim AS runtime
 
+# 系统依赖: Tesseract OCR (图片上传走 OCR 抽取文字, 含中文语言包)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-chi-sim \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # 从 builder 阶段复制已安装的包

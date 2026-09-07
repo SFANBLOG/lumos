@@ -35,6 +35,10 @@ dependencies = [
     # ---- Object Storage ----
     "minio>=7.2.0",
 
+    # ---- OCR (图片上传抽取文字) ----
+    "pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+
     # ---- Auth ----
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.0.0",

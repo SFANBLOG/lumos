@@ -44,6 +44,12 @@ _ALLOWED_MIME = {
     "rtf": "application/rtf",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "bmp": "image/bmp",
 }
 
 
@@ -56,7 +62,7 @@ class UrlIngestRequest(BaseModel):
 @router.post(
     "/file",
     summary="上传文件并抽取文本",
-    description="支持 pdf/docx/txt/csv/md/html/rtf/xlsx/pptx (≤10MB)，原文件存档 MinIO，返回抽取出的纯文本。",
+    description="支持 文档(pdf/docx/txt/csv/md/html/rtf/xlsx/pptx) 与 图片(png/jpg/jpeg/gif/webp/bmp, 走 OCR 抽取文字) (≤10MB)，原文件存档 MinIO，返回抽取出的纯文本。",
 )
 async def ingest_file(
     _auth: AuthAny,
