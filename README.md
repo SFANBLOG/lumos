@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="./public/images/banner.png" alt="Lumos · 契光鉴微" width="100%" />
-</p>
-
-<p align="center">
   <strong>🔍 开源 AI 合同风险排查助手 · 拍照即查 · 中国劳动法深度适配 · 完全免费</strong>
 </p>
 
