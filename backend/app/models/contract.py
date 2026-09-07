@@ -20,6 +20,8 @@ class ContractSource(str, Enum):
     PDF_UPLOAD = "pdf_upload"  # PDF 上传
     WORD_UPLOAD = "word_upload"  # Word 上传
     TEXT_PASTE = "text_paste"  # 文本粘贴
+    FILE_UPLOAD = "file_upload"  # 文件上传 (智能导入抽取文本)
+    URL_ANALYSIS = "url_analysis"  # 网页链接分析
 
 
 class ContractStatus(str, Enum):

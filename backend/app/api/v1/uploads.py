@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.api.deps import AuthGuard, DBSession
+from app.api.deps import AuthAny, DBSession
 from app.core.minio_client import upload_file
 
 router = APIRouter(prefix="/uploads", tags=["📤 文件上传"])
@@ -27,7 +27,7 @@ _ALLOWED_TYPES = {
 )
 async def upload_contract_file(
     session: DBSession,
-    _auth: AuthGuard,
+    _auth: AuthAny,
     file: UploadFile = File(...),  # noqa: B008
     contract_id: str | None = Form(None),
 ) -> dict:

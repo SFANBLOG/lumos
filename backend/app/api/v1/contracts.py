@@ -13,23 +13,139 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from sqlalchemy import func
 from sqlmodel import select
 
 from app.agent.graph import run_contract_analysis
-from app.api.deps import AuthGuard, DBSession
-from app.models.analysis import AnalysisResult, RiskItem
+from app.api.deps import AuthAny, DBSession
+from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
 from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse, SSEEventType
 from app.schemas.contract import (
     ContractCreateRequest,
+    ContractListResponse,
     ContractResponse,
+    ContractStatsResponse,
     ContractSubmitResponse,
 )
 
 router = APIRouter(prefix="/contracts", tags=["📄 合同分析"])
+
+
+async def _to_list_item(contract: Contract) -> dict:
+    """合同记录 → 列表项 (含正文预览)."""
+    return {
+        "id": contract.id,
+        "source": contract.source,
+        "status": contract.status,
+        "char_count": contract.char_count,
+        "created_at": contract.created_at,
+        "preview": (contract.raw_text or "")[:80],
+    }
+
+
+# ─── GET /contracts (列表, 须在 /{contract_id} 之前注册) ───────
+
+
+@router.get(
+    "",
+    response_model=ContractListResponse,
+    summary="合同记录列表 (分页)",
+)
+async def list_contracts(
+    session: DBSession,
+    _auth: AuthAny,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    status_filter: ContractStatus | None = Query(default=None, alias="status"),
+) -> ContractListResponse:
+    """按时间倒序分页查询合同记录, 可按状态过滤."""
+    where = [Contract.status == status_filter] if status_filter else []
+
+    count_stmt = select(func.count()).select_from(Contract)
+    if where:
+        count_stmt = count_stmt.where(*where)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = select(Contract)
+    if where:
+        stmt = stmt.where(*where)
+    stmt = stmt.order_by(Contract.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    items = (await session.execute(stmt)).scalars().all()
+
+    return ContractListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=[await _to_list_item(c) for c in items],
+    )
+
+
+# ─── GET /contracts/stats (看板统计, 须在 /{contract_id} 之前注册) ─
+
+
+@router.get(
+    "/stats",
+    response_model=ContractStatsResponse,
+    summary="看板统计汇总",
+)
+async def get_stats(
+    session: DBSession,
+    _auth: AuthAny,
+) -> ContractStatsResponse:
+    """返回分析总量、状态分布、平均分、风险等级计数与最近记录."""
+    async def count_where(*conds) -> int:
+        stmt = select(func.count()).select_from(Contract)
+        if conds:
+            stmt = stmt.where(*conds)
+        return (await session.execute(stmt)).scalar_one()
+
+    total = await count_where()
+    completed = await count_where(Contract.status == ContractStatus.COMPLETED)
+    analyzing = await count_where(Contract.status == ContractStatus.ANALYZING)
+    failed = await count_where(Contract.status == ContractStatus.FAILED)
+    pending = await count_where(Contract.status == ContractStatus.PENDING)
+
+    avg_score = (
+        await session.execute(
+            select(func.avg(AnalysisResult.overall_score))
+        )
+    ).scalar_one()
+    high_risk = (
+        await session.execute(
+            select(func.count())
+            .select_from(AnalysisResult)
+            .where(AnalysisResult.overall_level == RiskLevel.HIGH)
+        )
+    ).scalar_one()
+
+    level_rows = (
+        await session.execute(
+            select(RiskItem.level, func.count()).group_by(RiskItem.level)
+        )
+    ).all()
+    level_counts = {lv.value: 0 for lv in RiskLevel}
+    for level, cnt in level_rows:
+        if level is not None:
+            level_counts[level.value] = cnt
+
+    recent_stmt = select(Contract).order_by(Contract.created_at.desc()).limit(5)
+    recent = (await session.execute(recent_stmt)).scalars().all()
+
+    return ContractStatsResponse(
+        total=total,
+        completed=completed,
+        analyzing=analyzing,
+        failed=failed,
+        pending=pending,
+        avg_overall_score=round(avg_score, 1) if avg_score is not None else None,
+        high_risk_contracts=high_risk,
+        level_counts=level_counts,
+        recent=[await _to_list_item(c) for c in recent],
+    )
 
 
 # ─── POST /contracts ───────────────────────────────────────────
@@ -46,7 +162,7 @@ router = APIRouter(prefix="/contracts", tags=["📄 合同分析"])
 async def submit_contract(
     request: ContractCreateRequest,
     session: DBSession,
-    _auth: AuthGuard,
+    _auth: AuthAny,
 ) -> ContractSubmitResponse:
     """提交合同文本进行 AI 风险排查."""
     logger.info(
@@ -156,7 +272,7 @@ async def stream_analysis(
 async def get_report(
     contract_id: str,
     session: DBSession,
-    _auth: AuthGuard,
+    _auth: AuthAny,
 ) -> AnalysisReportResponse:
     """获取合同的完整风险分析报告."""
     # 查找合同
@@ -214,7 +330,7 @@ async def get_report(
 async def get_contract(
     contract_id: str,
     session: DBSession,
-    _auth: AuthGuard,
+    _auth: AuthAny,
 ) -> ContractResponse:
     """查询合同记录与当前处理状态."""
     contract = await session.get(Contract, contract_id)

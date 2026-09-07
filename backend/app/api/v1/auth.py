@@ -6,9 +6,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.deps import DBSession, get_current_user
@@ -52,7 +51,7 @@ class UserResponse(BaseModel):
 )
 async def register(
     request: RegisterRequest,
-    session: AsyncSession,
+    session: DBSession,
 ) -> User:
     """注册新用户."""
     # 检查用户名/邮箱是否已存在
@@ -85,7 +84,7 @@ async def register(
 )
 async def login(
     request: LoginRequest,
-    session: AsyncSession,
+    session: DBSession,
 ) -> TokenResponse:
     """用户登录并返回 JWT."""
     result = await session.execute(

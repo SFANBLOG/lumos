@@ -30,7 +30,9 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 
 # 非 root 用户运行
-RUN groupadd -r lumos && useradd -r -g lumos lumos
+RUN groupadd -r lumos && useradd -r -g lumos lumos \
+    && mkdir -p /home/lumos && chown -R lumos:lumos /home/lumos
+ENV HOME=/home/lumos
 USER lumos
 
 # 暴露端口

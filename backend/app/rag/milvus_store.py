@@ -9,7 +9,14 @@ from __future__ import annotations
 from functools import lru_cache
 
 from loguru import logger
-from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections
+from pymilvus import (
+    Collection,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+    connections,
+    utility,
+)
 
 from app.core.config import get_settings
 from app.rag.law_corpus import ALL_LAWS
@@ -45,7 +52,7 @@ def get_milvus_collection() -> Collection:
     ]
     schema = CollectionSchema(fields, description="劳动法条文向量库")
 
-    if collection_name not in [c.name for c in Collection.list()]:
+    if collection_name not in utility.list_collections():
         collection = Collection(name=collection_name, schema=schema)
         index_params = {
             "index_type": "IVF_FLAT",
