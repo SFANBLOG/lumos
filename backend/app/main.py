@@ -1,0 +1,120 @@
+"""
+Lumos Server — FastAPI 应用入口.
+
+🔍 契光鉴微 · AI 合同风险排查引擎
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
+
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from loguru import logger
+
+from app.api.v1.router import v1_router
+from app.core.config import get_settings
+from app.core.database import init_db
+from app.core.logging import setup_logging
+from app.middleware import register_middleware
+from app.rag.vector_store import init_vector_store
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """应用生命周期管理."""
+    # ── 启动 ──
+    setup_logging()
+    settings = get_settings()
+
+    logger.info("=" * 60)
+    logger.info(f"🔍 {settings.app_name} v{settings.app_version}")
+    logger.info(f"📍 环境: {settings.app_env.value}")
+    logger.info(f"🗄️ 数据库: {settings.database_url[:50]}...")
+    logger.info(f"🤖 LLM: {settings.llm_model_name} @ {settings.llm_base_url[:40]}")
+    logger.info(f"🔐 鉴权: {'已启用' if settings.auth_enabled else '未启用'}")
+    logger.info("=" * 60)
+
+    # 初始化数据库
+    await init_db()
+    logger.info("✅ 数据库初始化完成")
+
+    # 初始化向量库
+    init_vector_store()
+
+    # 初始化 MCP 服务端
+    from app.mcp.server import get_mcp_server
+    get_mcp_server()
+
+    # 初始化技能注册中心
+    from app.skills import list_skills
+    logger.info(f"🛠️ 技能列表: {list_skills()}")
+
+    # 初始化 MinIO
+    from app.core.minio_client import init_minio
+    init_minio()
+
+    logger.info(f"🚀 服务已启动: http://{settings.app_host}:{settings.app_port}")
+    logger.info(f"📚 API 文档: http://{settings.app_host}:{settings.app_port}/docs")
+    logger.info(f"🌐 Web 前端: http://{settings.app_host}:{settings.app_port}/")
+
+    yield
+
+    # ── 关闭 ──
+    logger.info("👋 服务正在关闭…")
+
+
+def create_app() -> FastAPI:
+    """创建并配置 FastAPI 应用实例."""
+    settings = get_settings()
+
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.app_version,
+        description=(
+            "🔍 **Lumos · 契光鉴微** — AI 合同风险排查引擎\n\n"
+            "开源免费的劳动合同风险检测服务，站在劳动者视角，\n"
+            "深度适配中国劳动法，一键排查合同中的十大坑点。\n\n"
+            "---\n"
+            "- 📸 拍照即查 (端侧 OCR)\n"
+            "- 💬 \"说人话\"的条款解读\n"
+            "- 🗣️ 一键生成谈判话术\n"
+            "- ⚡ SSE 流式实时分析\n"
+        ),
+        docs_url="/docs",
+        redoc_url="/redoc",
+        lifespan=lifespan,
+    )
+
+    # ── 中间件 (后注册的先执行) ──
+    register_middleware(app)
+
+    # ── CORS 跨域 ──
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if settings.is_development else [],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # ── 注册 API 路由 ──
+    app.include_router(v1_router)
+
+    # ── 挂载静态文件 ──
+    static_dir = Path(__file__).parent / "web" / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # ── Web 前端路由 (放在最后，避免抢占 API 路径) ──
+    from app.web.routes import web_router
+    app.include_router(web_router)
+
+    return app
+
+
+# 应用实例 (供 uvicorn 直接引用: uvicorn app.main:app)
+app = create_app()
