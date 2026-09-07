@@ -29,12 +29,20 @@ class LumosMCPServer:
             self._tools[tool.name] = tool
         logger.info(f"MCP 服务端已初始化 | 注册工具: {list(self._tools)}")
 
-    def list_tools(self) -> list[dict[str, str]]:
-        """列出所有可用工具的描述."""
+    def list_tools(self) -> list[dict[str, Any]]:
+        """列出所有可用工具的描述 (含参数 schema)."""
         return [
-            {"name": t.name, "description": t.description}
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": getattr(t, "input_schema", {"type": "object", "properties": {}, "required": []}),
+            }
             for t in self._tools.values()
         ]
+
+    def get_tool(self, tool_name: str) -> Any | None:
+        """按名称获取工具实例, 不存在返回 None."""
+        return self._tools.get(tool_name)
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """调用指定工具."""

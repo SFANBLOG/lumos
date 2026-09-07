@@ -14,12 +14,11 @@ from sqlalchemy.future import select
 
 from app.core.config import get_settings
 from app.core.database import get_session
-from app.core.security import decode_access_token, verify_api_key
+from app.core.security import decode_access_token
 from app.models.user import User
 
 # 类型别名, 在路由中直接使用
 DBSession = Annotated[AsyncSession, Depends(get_session)]
-AuthGuard = Annotated[str | None, Depends(verify_api_key)]
 
 settings = get_settings()
 
@@ -31,7 +30,7 @@ async def auth_any_jwt_or_key(
     """
     联合鉴权: JWT (浏览器) 或 X-API-Key (程序) 任一通过即可.
 
-    未配置 api_secret_key 时放行 (开发友好, 与原 AuthGuard 语义一致).
+    未配置 api_secret_key 时放行 (开发友好).
     """
     if not settings.auth_enabled:
         return None

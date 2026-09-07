@@ -26,8 +26,3 @@ class MCPClient:
         except Exception as e:
             logger.error(f"MCP 调用失败: {tool_name} → {e}")
             raise
-
-    async def list_tools(self) -> list[dict[str, str]]:
-        """列出可用工具."""
-        server = get_mcp_server()
-        return server.list_tools()

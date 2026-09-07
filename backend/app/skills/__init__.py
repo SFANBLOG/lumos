@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from app.skills.base import BaseSkill
+from app.skills.followup_suggestion import FollowupSuggestionSkill
 from app.skills.legal_analysis import LegalAnalysisSkill
 from app.skills.negotiation import NegotiationSkill
 from app.skills.risk_scoring import RiskScoringSkill
@@ -17,6 +18,7 @@ _SKILL_REGISTRY: dict[str, type[BaseSkill]] = {
     "legal_analysis": LegalAnalysisSkill,
     "risk_scoring": RiskScoringSkill,
     "negotiation": NegotiationSkill,
+    "followup_suggestion": FollowupSuggestionSkill,
 }
 
 

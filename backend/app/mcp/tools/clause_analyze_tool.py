@@ -18,6 +18,14 @@ class ClauseAnalyzeTool:
 
     name = "clause_analyze"
     description = "对单条合同条款进行风险分类和法律关联分析"
+    input_schema: dict = {
+        "type": "object",
+        "properties": {
+            "clause_title": {"type": "string", "description": "条款标题/主题"},
+            "clause_content": {"type": "string", "description": "条款原文内容"},
+        },
+        "required": ["clause_title", "clause_content"],
+    }
 
     async def run(
         self,

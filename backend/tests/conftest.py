@@ -51,8 +51,17 @@ async def client(async_session: AsyncSession) -> AsyncGenerator[AsyncClient, Non
 
     app.dependency_overrides[get_session] = override_get_session
 
+    # 环境启用鉴权时, 统一携带 X-API-Key 通过 AuthAny
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    headers = (
+        {"X-API-Key": settings.api_secret_key} if settings.auth_enabled else None
+    )
+
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
+        headers=headers,
     ) as ac:
         yield ac

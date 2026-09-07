@@ -41,7 +41,7 @@
             <el-upload
               drag
               action="#"
-              accept=".pdf,.txt,.docx,.csv"
+              accept=".pdf,.txt,.docx,.csv,.md,.html,.htm,.rtf,.xlsx,.pptx"
               :auto-upload="true"
               :show-file-list="false"
               :http-request="onFileUpload"
@@ -51,7 +51,9 @@
               <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
               <div class="el-upload__text">将文件拖到此处，或 <em>点击选择文件</em></div>
               <template #tip>
-                <div class="el-upload__tip">支持 PDF / TXT / DOCX / CSV，单个文件不超过 10MB</div>
+                <div class="el-upload__tip">
+                  支持 PDF / DOCX / TXT / CSV / MD / HTML / RTF / XLSX / PPTX 共 9 种格式，单个文件不超过 10MB
+                </div>
               </template>
             </el-upload>
 

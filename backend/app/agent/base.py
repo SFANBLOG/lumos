@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Any
 
 from loguru import logger
@@ -39,10 +39,11 @@ class BaseAgent(ABC):
         response = await llm.ainvoke(messages)
         return response.content.strip()
 
-    @abstractmethod
     async def run(self, state: AgentState) -> AgentState:
         """执行智能体任务，读写全局状态."""
-        ...
+        raise NotImplementedError(
+            f"[{self.name}] 不参与合同状态流 (未实现 run)"
+        )
 
     async def __call__(self, state: AgentState) -> AgentState:
         logger.info(f"🤖 [{self.name}] 开始执行 | 合同ID: {state.contract_id}")

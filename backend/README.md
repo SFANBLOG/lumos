@@ -45,4 +45,8 @@ uvicorn app.main:app --reload --port 8000
 | `GET` | `/api/v1/contracts/{id}/report` | 获取完整报告 |
 | `GET` | `/api/v1/mcp/tools` | 列出 MCP 工具 |
 | `POST` | `/api/v1/mcp/tools/call` | 调用 MCP 工具 |
-| `POST` | `/api/v1/uploads` | 上传 PDF/Word 文件 |
+| `POST` | `/api/v1/ingest/file` | 上传文件并抽取文本 (10 种格式) |
+| `POST` | `/api/v1/ingest/url` | 抓取网页链接并抽取正文 |
+| `POST` | `/api/v1/consult/ask` | 智能咨询 (SSE 流式) |
+| `GET` | `/api/v1/consult/sessions` | 咨询会话列表 |
+| `GET` | `/api/v1/consult/sessions/{id}/messages` | 会话消息记录 |

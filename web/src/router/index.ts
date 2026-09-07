@@ -35,6 +35,12 @@ const router = createRouter({
           meta: { title: '智能分析' },
         },
         {
+          path: 'consult',
+          name: 'Consult',
+          component: () => import('@/views/ConsultView.vue'),
+          meta: { title: '智能咨询' },
+        },
+        {
           path: 'reports',
           name: 'Reports',
           component: () => import('@/views/ReportsView.vue'),
