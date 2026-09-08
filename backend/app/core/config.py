@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     embedding_base_url: str = "https://api.deepseek.com/v1"
     embedding_model_name: str = "text-embedding-v3"
 
+    # ── 多模态视觉模型 (图片/扫描件 OCR) ─────────────────────
+    # 复用 OpenAI 兼容接口; DeepSeek 无视觉能力, 默认走通义千问 VL (DashScope 兼容模式)。
+    # 视觉模型使用独立密钥; 未配置 llm_vision_api_key 时图片自动回退本地 Tesseract OCR。
+    llm_vision_api_key: str = ""
+    llm_vision_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    llm_vision_model_name: str = "qwen-vl-max-latest"
+    image_ocr_strategy: str = "auto"  # auto | llm | tesseract
+
     # ── 安全 ──────────────────────────────────────────────────
     api_secret_key: str = ""
     jwt_secret_key: str = "change-me-in-production"

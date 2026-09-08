@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 from html.parser import HTMLParser
 
@@ -345,13 +346,29 @@ def extract_pptx(data: bytes) -> tuple[str, bool]:
     return "\n".join(parts), False
 
 
-# ─── IMAGE (OCR) ───────────────────────────────────────────
+# ─── IMAGE (OCR / 多模态 LLM) ──────────────────────────────
 
-def extract_image(data: bytes) -> tuple[str, bool]:
+
+def _guess_image_mime(data: bytes) -> str:
+    """按文件头推断图片 MIME (无需第三方库)."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:2] == b"BM":
+        return "image/bmp"
+    return "image/png"  # 兜底, 多模态模型大多兼容
+
+
+def _extract_image_tesseract(data: bytes) -> tuple[str, bool]:
     """
-    图片 OCR 抽取文本 (合同拍照/扫描件).
+    本地 Tesseract OCR 抽取文本 (合同拍照/扫描件).
 
-    依赖 Pillow + pytesseract + 系统 Tesseract (含 chi_sim/eng 语言包).
+    依赖 Pillow + pytesseract + 系统 Tesseract (含 chi_sim/eng 语言包)。
     Tesseract 未安装或图片解码失败时抛 ServiceNotReadyError, 由路由转 503。
     """
     try:
@@ -372,6 +389,80 @@ def extract_image(data: bytes) -> tuple[str, bool]:
         raise ServiceNotReadyError(f"OCR 引擎不可用: {e}") from e
 
     return text, True
+
+
+def extract_image_via_llm(data: bytes) -> tuple[str, bool]:
+    """
+    多模态 LLM 图片文字抽取 (高准确率, 支持中文/表格/手写).
+
+    复用 OpenAI 兼容视觉接口 (默认通义千问 VL); 未配置视觉密钥时抛
+    ServiceNotReadyError 以便上层回退到 Tesseract。
+    """
+    try:
+        from langchain_openai import ChatOpenAI  # noqa: F401  (确保依赖可用)
+    except ImportError as e:
+        raise ServiceNotReadyError("多模态 LLM 组件未就绪, 请稍后重试") from e
+
+    from app.agent.llm import get_vision_llm
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    if not settings.llm_vision_api_key:
+        raise ServiceNotReadyError("未配置视觉模型 API Key, 回退本地 OCR")
+
+    mime = _guess_image_mime(data)
+    data_uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+    llm = get_vision_llm()
+    messages = [
+        (
+            "user",
+            [
+                {
+                    "type": "text",
+                    "text": (
+                        "请完整提取图片中的全部文字内容, 保留原有段落、标题与表格排版, "
+                        "只输出文字本身, 不要任何解释或前缀。"
+                    ),
+                },
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ],
+        )
+    ]
+
+    try:
+        resp = llm.invoke(messages)
+    except Exception as e:  # 网络/鉴权/配额等, 交由上层决定回退
+        raise ServiceNotReadyError(f"多模态 LLM 调用失败: {e}") from e
+
+    content = getattr(resp, "content", None) or ""
+    if isinstance(content, list):  # 部分 provider 返回 list[block]
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content, True
+
+
+def extract_image(data: bytes) -> tuple[str, bool]:
+    """
+    图片文字抽取统一入口: 多模态 LLM 为主, Tesseract OCR 兜底。
+
+    策略由 settings.image_ocr_strategy 控制:
+      - auto     : 配置了视觉模型则优先 LLM, 失败/未配置回退 Tesseract (默认)
+      - llm      : 仅用 LLM, 不可用即抛 503
+      - tesseract: 仅用 Tesseract OCR
+    """
+    from app.core.config import get_settings
+
+    strategy = get_settings().image_ocr_strategy.lower()
+    if strategy == "tesseract":
+        return _extract_image_tesseract(data)
+    if strategy == "llm":
+        return extract_image_via_llm(data)
+
+    # auto: 优先多模态 LLM, 任意失败回退本地 OCR
+    try:
+        return extract_image_via_llm(data)
+    except ServiceNotReadyError:
+        return _extract_image_tesseract(data)
 
 
 # ─── 统一入口 ──────────────────────────────────────────────────

@@ -28,3 +28,20 @@ def get_chat_llm(temperature: float | None = None) -> ChatOpenAI:
         max_tokens=4096,
         streaming=True,
     )
+
+
+def get_vision_llm(temperature: float = 0.0) -> ChatOpenAI:
+    """获取多模态(视觉)大模型客户端, 用于图片/扫描件文字抽取.
+
+    走 OpenAI 兼容接口 (默认通义千问 VL), 非流式单次返回。
+    """
+    settings = get_settings()
+
+    return ChatOpenAI(
+        api_key=settings.llm_vision_api_key,
+        base_url=settings.llm_vision_base_url,
+        model=settings.llm_vision_model_name,
+        temperature=temperature,
+        max_tokens=4096,
+        streaming=False,
+    )
