@@ -1,8 +1,0 @@
-raw = open("ask_events.txt", encoding="utf-8").read()
-print("len:", len(raw))
-print("has data:", "data: " in raw)
-print("has session_id:", "session_id" in raw)
-print("repr head:", repr(raw[:200]))
-blocks = raw.split("\n\n")
-print("n blocks:", len(blocks))
-print("data blocks:", sum(1 for b in blocks if b.startswith("data: ")))

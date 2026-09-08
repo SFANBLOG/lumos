@@ -94,6 +94,9 @@ tmp/
 temp/
 *.tmp
 
+# ---- WorkBuddy Agent Memory ----
+.workbuddy/
+
 # ---- Vue Web ----
 web/node_modules/
 web/dist/
