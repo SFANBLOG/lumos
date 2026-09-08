@@ -181,8 +181,8 @@ cp .env.example .env
 docker-compose up -d
 
 # 访问
-# Web 前端: http://localhost
-# API 文档: http://localhost:8000/docs
+# Web 前端: http://localhost:8080
+# API 文档: http://localhost:8001/docs
 ```
 
 ### 本地开发后端

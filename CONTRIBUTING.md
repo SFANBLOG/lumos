@@ -56,7 +56,7 @@ flutter pub get
 flutter run -d chrome
 ```
 
-### 服务端 (Python) — 规划中
+### 服务端 (Python)
 
 ```bash
 # 确保 Python 3.12+
@@ -69,12 +69,17 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 安装依赖
-pip install -r requirements.txt
+# 安装开发依赖（含测试与构建工具链）
+pip install -e ".[dev]"
+
+# 准备环境变量并填入 AI API Key 等配置
+cp .env.example .env  # Windows: copy .env.example .env
 
 # 启动开发服务器
 uvicorn app.main:app --reload
 ```
+
+> 若仅需体验全栈，可直接在仓库根目录执行 `docker compose up -d` 一键启动 MySQL / MinIO / Milvus / 后端 / Web。
 
 ---
 
@@ -108,6 +113,7 @@ uvicorn app.main:app --reload
 
 - `client` — Flutter 客户端相关
 - `server` — Python 服务端相关
+- `web` — Vue 3 Web 前端相关
 - `docs` — 文档
 - `legal` — 法律条款库
 
@@ -180,11 +186,20 @@ Closes #12
 lumos/
 ├── client/          # Flutter 客户端
 │   └── lib/
-│       ├── core/       # 主题、路由、API
+│       ├── core/       # API、状态、路由、主题
 │       ├── features/   # 业务功能模块
 │       └── shared/     # 公共组件
-├── backend/         # Python 服务端 (规划中)
+├── web/             # Vue 3 Web 前端
+├── backend/         # Python FastAPI 服务端
+│   ├── app/
+│   │   ├── agent/      # Multi-Agent 分析引擎
+│   │   ├── api/        # FastAPI 路由
+│   │   ├── mcp/        # MCP 工具服务
+│   │   ├── rag/        # 法条向量检索
+│   │   └── skills/     # 可复用技能
+│   └── tests/          # 后端测试
 ├── docs/            # 项目文档
+├── data/            # 合同测试样本
 └── public/          # 静态资源
 ```
 

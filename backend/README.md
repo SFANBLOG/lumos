@@ -37,6 +37,8 @@ uvicorn app.main:app --reload --port 8000
 
 | 方法 | 端点 | 描述 |
 |:---|:---|:---|
+| `GET` | `/api/v1/health` | 健康检查 |
+| `GET` | `/api/v1/health/ready` | 就绪检查 |
 | `POST` | `/api/v1/auth/register` | 用户注册 |
 | `POST` | `/api/v1/auth/login` | 用户登录 |
 | `GET` | `/api/v1/auth/me` | 当前用户信息 |
@@ -50,3 +52,4 @@ uvicorn app.main:app --reload --port 8000
 | `POST` | `/api/v1/consult/ask` | 智能咨询 (SSE 流式) |
 | `GET` | `/api/v1/consult/sessions` | 咨询会话列表 |
 | `GET` | `/api/v1/consult/sessions/{id}/messages` | 会话消息记录 |
+| `DELETE` | `/api/v1/consult/sessions/{id}` | 删除咨询会话 |
