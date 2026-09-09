@@ -149,7 +149,7 @@ lumos/
 | 向量库索引 | 未定型 | 现为：语料内容哈希 + embedding 签名双重校验，变化即自动重建；Milvus 集合名带签名后缀隔离；向量维度由模型自动探测，度量 COSINE |
 | 文档解析（LlamaIndex） | 未采用 | 实际为轻量自有解析栈：pypdf / python-docx / openpyxl / python-pptx / RTF·HTML 纯标准库，支持 16 种扩展名 |
 | OCR | 未定型 | 多模态视觉 LLM（通义千问 VL）+ Tesseract 本地兜底，`auto/llm/tesseract` 三级策略 |
-| 模型接入 | 未定型 | LangChain ChatOpenAI 兼容层（DeepSeek 默认）；**RAG embedding 为真实模型双 Provider**：本地 sentence-transformers（默认 `paraphrase-multilingual-MiniLM-L12-v2`）/ OpenAI 兼容 API，二者向量空间不一致时按签名自动重建索引 |
+| 模型接入 | 未定型 | LangChain ChatOpenAI 兼容层（DeepSeek 默认）；**RAG embedding 为真实模型双 Provider**：本地 sentence-transformers（默认 `BAAI/bge-base-zh-v1.5`）/ OpenAI 兼容 API，二者向量空间不一致时按签名自动重建索引 |
 | 评测 | 未规划 | 已新增 `backend/eval/` 离线检索评测与测试体系，见 A.3 |
 
 ### A.2 目录结构对照

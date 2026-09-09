@@ -3,11 +3,14 @@ Embedding 提供者 (真实模型, 非占位向量).
 
 支持两种通道, 通过 ``EMBEDDING_PROVIDER`` 切换:
 - ``local`` (默认): sentence-transformers 本地模型, 默认
-  ``paraphrase-multilingual-MiniLM-L12-v2`` (384 维, 中文友好, 离线可用);
+  ``BAAI/bge-base-zh-v1.5`` (768 维, 中文检索友好, 离线可用);
 - ``api``: OpenAI 兼容 ``/embeddings`` 接口 (如硅基流动 BAAI/bge-m3 等)。
 
 向量库按 ``embedding_signature()`` 隔离: 切换模型/通道后索引自动重建,
 避免不同模型向量混在同一集合中导致检索失真。
+
+BGE 系列检索约定: 仅对 query 追加指令前缀 (文档不做处理),
+可显著提升召回精度, 见 ``LocalSentenceTransformerEmbedder.embed_query``。
 """
 
 from __future__ import annotations
@@ -21,6 +24,9 @@ from loguru import logger
 from app.core.config import get_settings
 
 _EMBED_BATCH = 32
+
+#: BGE 中文检索 query 指令 (官方推荐; 仅对查询侧生效)
+_BGE_QUERY_INSTRUCTION_ZH = "为这个句子生成表示以用于检索相关文章："
 
 
 class EmbeddingNotReadyError(RuntimeError):
@@ -81,6 +87,19 @@ class LocalSentenceTransformerEmbedder(EmbeddingProvider):
                     self._model = SentenceTransformer(self.model_name)
                     logger.info(f"✅ embedding 模型就绪 | {self.model_name} | dim={self.dim}")
         return self._model
+
+    def embed_query(self, text: str) -> list[float]:
+        """单条查询向量化.
+
+        BGE 系列模型建议仅对 query 追加指令前缀 (文档不做处理),
+        可显著提升语义召回精度; 非 BGE 模型默认不追加。
+        """
+        instruction = get_settings().embedding_query_instruction
+        if not instruction and "bge" in self.model_name.lower():
+            instruction = _BGE_QUERY_INSTRUCTION_ZH
+        if instruction:
+            text = f"{instruction}{text}"
+        return self.embed_texts([text])[0]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         model = self._get_model()

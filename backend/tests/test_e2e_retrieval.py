@@ -6,7 +6,7 @@ Milvus 向量库 + BM25 + RRF 融合, 不再注入任何假对象,
 用于验证生产检索链路可用并产出真实指标。
 
 前置条件:
-- 本地 embedding 模型可加载 (默认 paraphrase-multilingual-MiniLM-L12-v2,
+- 本地 embedding 模型可加载 (默认 BAAI/bge-base-zh-v1.5,
   首次运行自动下载) 或已配置 EMBEDDING_PROVIDER=api;
 - Milvus 不可用时向量通道关闭, 仅保留 BM25 关键词检索。
 

@@ -98,8 +98,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       # 国内访问 huggingface.co 受限时用于拉取本地 embedding 模型 (可被 .env 覆盖)
       HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
-      # 使用宿主机持久化好的本地 embedding 模型 (只读), 避免容器内重复下载 ~470MB
-      EMBEDDING_MODEL_NAME: /models/paraphrase-multilingual-MiniLM-L12-v2
+      # 使用宿主机持久化好的本地 embedding 模型 (只读), 避免容器内重复下载
+      EMBEDDING_MODEL_NAME: /models/BAAI/bge-base-zh-v1.5
       # hf-mirror 不代理 Xet CAS 服务, 不禁用会 401 导致下载失败
       HF_HUB_DISABLE_XET: "1"
     ports:

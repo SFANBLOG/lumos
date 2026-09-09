@@ -55,11 +55,13 @@ class Settings(BaseSettings):
     # provider: local(默认, sentence-transformers 本地模型) | api(OpenAI 兼容 /embeddings)
     # 注意: 切换到不同模型/通道后向量索引会按签名自动重建
     embedding_provider: str = "local"
-    embedding_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_model_name: str = "BAAI/bge-base-zh-v1.5"
     embedding_base_url: str = "https://api.deepseek.com/v1"
     embedding_api_key: str = ""
     # 手动指定向量维度; 留空则由模型自动探测 (首次加载后确定)
     embedding_dim: int | None = None
+    # 检索 query 前缀指令 (BGE 系列建议 query 加指令、文档不加; 留空=按模型自动适配)
+    embedding_query_instruction: str = ""
 
     # ── 混合检索 (Milvus 向量 + BM25 + RRF 融合) ──────────────
     hybrid_top_k_ratio: int = 2  # 融合前各通道候选数 = top_k × 该值

@@ -7,6 +7,16 @@
 
 ---
 
+## [0.2.1] - 2026-09-09
+
+### 🔄 Embedding 模型升级
+- 默认本地模型 `paraphrase-multilingual-MiniLM-L12-v2`（384 维）→ **`BAAI/bge-base-zh-v1.5`**（768 维中文检索）。
+- 模型权重落盘为扁平目录 `backend/models/BAAI/bge-base-zh-v1.5/`（宿主机持久化，容器只读挂载），不再使用 HF hub-cache 式 `snapshots/` 结构。
+- 新增 BGE 检索约定：query 侧自动追加中文指令前缀（`embedding_query_instruction` 可覆盖），文档侧不加，提升语义召回精度。
+- Milvus 集合按 embedding 签名自动隔离，换模型后自动创建新集合，无需手工重建。
+
+---
+
 ## [0.2.0] - 2026-09-08
 
 ### ✨ Agent 引擎重构：真 LangGraph

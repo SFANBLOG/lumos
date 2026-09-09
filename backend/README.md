@@ -104,7 +104,7 @@ python -m eval.retrieval_eval --topk 5
 |---|---|---|
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_NAME` | — / deepseek / deepseek-chat | 主 LLM |
 | `EMBEDDING_PROVIDER` | `local` | `local`(sentence-transformers) \| `api` |
-| `EMBEDDING_MODEL_NAME` | `paraphrase-multilingual-MiniLM-L12-v2` | 本地模型名 |
+| `EMBEDDING_MODEL_NAME` | `BAAI/bge-base-zh-v1.5` | 本地模型名（已预下载到 `models/BAAI/bge-base-zh-v1.5/`） |
 | `HYBRID_TOP_K_RATIO` / `RRF_K` | `2` / `60` | 混合检索融合参数 |
 | `MILVUS_HOST` / `MILVUS_PORT` | localhost / 19530 | 向量库 |
 | `DATABASE_URL` | mysql+aiomysql://... | SQLAlchemy 连接串（**不再支持 SQLite**，Docker 由 compose 注入） |

@@ -99,8 +99,8 @@
 | LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → negotiate，共享 Pydantic `AgentState` |
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
-| 真实 Embedding | `sentence-transformers` 本地模型（默认 `paraphrase-multilingual-MiniLM-L12-v2`）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
-| Milvus | 向量数据库（COSINE，动态维度），不可用时自动降级 ChromaDB |
+| 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
+| Milvus | 向量数据库（COSINE，动态维度）；不可用时向量通道自动关闭，仅保留 BM25 关键词检索 |
 | BM25 (jieba) | 法条语料全文关键词通道，与向量通道经 **RRF** 融合 |
 | MinIO | 对象存储，合同文件与扫描件上传 |
 
@@ -381,7 +381,7 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `LLM_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI 兼容接口地址 |
 | | `LLM_MODEL_NAME` | `deepseek-chat` | 模型名称 |
 | Embedding | `EMBEDDING_PROVIDER` | `local` | `local`（sentence-transformers 本地）\| `api`（OpenAI 兼容 /embeddings） |
-| | `EMBEDDING_MODEL_NAME` | `paraphrase-multilingual-MiniLM-L12-v2` | 模型名（`api` 模式为接口模型 ID） |
+| | `EMBEDDING_MODEL_NAME` | `BAAI/bge-base-zh-v1.5` | 模型名（`api` 模式为接口模型 ID） |
 | | `EMBEDDING_API_KEY` | （空） | `api` 模式密钥 |
 | | `EMBEDDING_BASE_URL` | `https://api.deepseek.com/v1` | `api` 模式接口地址 |
 | | `EMBEDDING_DIM` | （空） | 手动指定向量维度；留空则由模型自动探测 |
