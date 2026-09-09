@@ -1,0 +1,24 @@
+# 本地 embedding 模型 (~500MB)
+# 不进镜像: 通过 docker-compose volume 挂载 ./backend/models 到容器 /models
+models/
+
+# HuggingFace 下载缓存中间产物 (仅用于生成 models/ 目录, 运行时不需要)
+hf_cache/
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 测试/覆盖率 ----
+htmlcov/
+.coverage
+.coverage.*
+
+# ---- 环境 ----
+.env
+.venv/
+venv/
