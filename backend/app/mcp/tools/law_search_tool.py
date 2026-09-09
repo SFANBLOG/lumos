@@ -6,6 +6,7 @@ MCP 工具: 法律条文语义检索.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from loguru import logger
@@ -42,7 +43,10 @@ class LawSearchTool:
         category: str | None = None,
     ) -> dict[str, Any]:
         logger.debug(f"[law_search] query={query!r} top_k={top_k}")
-        results = search_laws(query=query, n_results=top_k, category=category)
+        # 检索链路含本地 embedding/网络调用, 移至线程池避免阻塞事件循环
+        results = await asyncio.to_thread(
+            search_laws, query=query, n_results=top_k, category=category
+        )
         return {
             "query": query,
             "results": results,

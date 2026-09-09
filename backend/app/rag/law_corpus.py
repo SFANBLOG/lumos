@@ -14,6 +14,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
+
 # ── 《中华人民共和国劳动合同法》(2012修正) ────────────────────
 
 LABOR_CONTRACT_LAW: list[dict] = [
@@ -262,3 +266,9 @@ ALL_LAWS: list[dict] = (
     + ARBITRATION_LAW
     + ANNUAL_LEAVE
 )
+
+
+def corpus_hash() -> str:
+    """语料内容签名 (sha256 前 12 位), 用于判断索引是否需要重建."""
+    payload = json.dumps(ALL_LAWS, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]

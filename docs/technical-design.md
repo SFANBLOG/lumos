@@ -131,3 +131,55 @@ lumos/
 
 - **部署极简性**：后端使用现代化的 `uv` 搭配 Docker，一行代码 `docker-compose up` 就能在服务器启动专属的 AI 大脑。
 - **本地降级方案**：未来可通过让 Python 节点直接调用本地的 Ollama，实现彻底的本地私海域审查。
+
+---
+
+## 附录 A：实现现状对照（v0.6.0 · 2026-09-08）
+
+> 本文档第 1-6 章为早期设计基线；下表是落地后的实际实现，二者冲突处以本附录与仓库代码为准。
+
+### A.1 技术选型落地情况
+
+| 设计基线（早期） | 实际落地 | 说明 |
+|---|---|---|
+| LangGraph / PydanticAI 二选一 | **LangGraph 1.x 真 StateGraph** | `app/agent/graph.py`：extract → retrieve → review → negotiate 四节点线性链，节点共享 Pydantic `AgentState`（含 `events` 事件通道），`graph.astream` 增量回放事件；节点错误转 `THINKING` 警告并继续，全图失败才发 `ERROR` |
+| 自研编排器 | 已废弃 | 早期 `supervisor.py` 手动 for 循环编排已删除，全部迁移至 LangGraph |
+| SQLModel（SQLite/PG） | **SQLModel + aiomysql，MySQL 8** | Docker Compose 编排，宿主端口 3308 |
+| 纯向量语义检索 | **向量 + BM25 混合检索（RRF 融合）** | `app/rag/`：向量通道（Milvus → 不可用降级 ChromaDB）+ BM25 通道（jieba 分词 + 法律领域词典）→ `hybrid.py` RRF（k=60）融合，任一通道失败自动降级单通道 |
+| 向量库索引 | 未定型 | 现为：语料内容哈希 + embedding 签名双重校验，变化即自动重建；Milvus 集合名带签名后缀隔离；向量维度由模型自动探测，度量 COSINE |
+| 文档解析（LlamaIndex） | 未采用 | 实际为轻量自有解析栈：pypdf / python-docx / openpyxl / python-pptx / RTF·HTML 纯标准库，支持 16 种扩展名 |
+| OCR | 未定型 | 多模态视觉 LLM（通义千问 VL）+ Tesseract 本地兜底，`auto/llm/tesseract` 三级策略 |
+| 模型接入 | 未定型 | LangChain ChatOpenAI 兼容层（DeepSeek 默认）；**RAG embedding 为真实模型双 Provider**：本地 sentence-transformers（默认 `paraphrase-multilingual-MiniLM-L12-v2`）/ OpenAI 兼容 API，二者向量空间不一致时按签名自动重建索引 |
+| 评测 | 未规划 | 已新增 `backend/eval/` 离线检索评测与测试体系，见 A.3 |
+
+### A.2 目录结构对照
+
+落地后 `backend/` 结构（与第 5 章规划相比）：
+
+```
+backend/
+├── app/
+│   ├── agent/               # LangGraph 编排
+│   │   ├── graph.py         # StateGraph + SSE runner（取代 supervisor.py）
+│   │   ├── state.py         # AgentState
+│   │   ├── base.py / llm.py # 子智能体基类 / LLM 工厂
+│   │   └── sub_agents/      # extractor/retriever/reviewer/negotiator/consultant
+│   ├── rag/                 # 混合检索
+│   │   ├── embeddings.py    # 双 Provider 真实 embedding
+│   │   ├── milvus_store.py  # Milvus（COSINE/动态维度/签名隔离）
+│   │   ├── vector_store.py  # search_laws 混合入口 + Chroma 降级
+│   │   ├── bm25_index.py    # BM25（jieba + 领域词典）
+│   │   ├── hybrid.py        # RRF 融合
+│   │   └── law_corpus.py    # 法条语料 + 哈希
+│   ├── api/ core/ mcp/ models/ schemas/ services/ skills/
+├── eval/                    # 检索评测 retrieval_eval.py（hit@k/MRR）
+└── tests/                   # pytest（API 冒烟 + 检索 + 工作流 + e2e marker）
+```
+
+其余前端 `web/`、`client/`、部署 `docker-compose.yml` 与基线一致。
+
+### A.3 测试与效果评测
+
+- **单元/冒烟测试**：25 条 pytest 用例（API 冒烟、BM25/领域词典、RRF 融合、Milvus 失败降级、LangGraph 状态流转与错误恢复）；`pytest --cov=app` 输出行覆盖率（RAG 核心模块 70%+，Milvus/Chroma 依赖真实服务的分支由 e2e 覆盖）；`e2e` marker 需 `LUMOS_E2E=1` 触发。
+- **离线检索评测**：以 `data/contracts/` 90 份单分类金标准（高危/警惕/关注三区 × 9 类 × 10 份）抽取风险句为查询，分向量 / BM25 / 混合三通道统计 `hit@1/3/5` 与 `MRR@5`，输出 `backend/eval/output/retrieval_eval_latest.{md,json}`。
+- **量化口径边界**：`backend/app` 行数、语料份数、用例条数均为**开发规模指标**；检出率 / `hit@k` / `MRR` 等**效果指标**一律以评测脚本输出为准（见根 README §八），二者不可混用表述。

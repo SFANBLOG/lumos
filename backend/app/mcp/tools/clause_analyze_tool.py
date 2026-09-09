@@ -6,6 +6,7 @@ MCP 工具: 单条款深度分析.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from loguru import logger
@@ -44,7 +45,9 @@ class ClauseAnalyzeTool:
             from app.rag.vector_store import search_laws
 
             query = f"{clause_title} {clause_content[:200]}"
-            law_tool_results = search_laws(
+            # 检索链路含本地 embedding/网络调用, 移至线程池避免阻塞事件循环
+            law_tool_results = await asyncio.to_thread(
+                search_laws,
                 query=query,
                 n_results=3,
                 category=analysis["primary_category"],

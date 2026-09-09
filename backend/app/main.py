@@ -37,12 +37,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"🔐 鉴权: {'已启用' if settings.auth_enabled else '未启用'}")
     logger.info("=" * 60)
 
-    # 初始化数据库
-    await init_db()
-    logger.info("✅ 数据库初始化完成")
+    # 初始化数据库 (MySQL 不可用时仅告警并继续启动, 关系型功能将降级)
+    try:
+        await init_db()
+        logger.info("✅ 数据库初始化完成")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"❌ 数据库初始化失败 (关系型功能将不可用, 请检查 DATABASE_URL/MySQL): {e}")
 
-    # 初始化向量库
-    init_vector_store()
+    # 初始化向量库 (后台执行: 加载本地 embedding 模型 + 写入 Milvus 可能耗时较长,
+    # 不阻塞服务启动; /health 立即可用, 向量通道在模型就绪后自动上线)
+    import asyncio
+
+    asyncio.create_task(asyncio.to_thread(init_vector_store))
 
     # 初始化 MCP 服务端
     from app.mcp.server import get_mcp_server
@@ -118,3 +124,16 @@ def create_app() -> FastAPI:
 
 # 应用实例 (供 uvicorn 直接引用: uvicorn app.main:app)
 app = create_app()
+
+
+# 允许直接 `python main.py` 启动 (免去记 uvicorn 命令)
+if __name__ == "__main__":
+    import uvicorn
+
+    _settings = get_settings()
+    uvicorn.run(
+        "app.main:app",
+        host=_settings.app_host,
+        port=_settings.app_port,
+        reload=_settings.is_development,
+    )

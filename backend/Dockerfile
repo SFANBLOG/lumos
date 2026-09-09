@@ -14,7 +14,9 @@ WORKDIR /app
 # 先复制依赖声明 (利用 Docker 层缓存)
 COPY pyproject.toml ./
 
-# 使用 uv 安装依赖
+# 先装 CPU 版 torch (本服务纯 CPU 推理, 避免拉取 2.5GB 的 NVIDIA CUDA 运行库导致构建极慢/失败)
+RUN uv pip install --system --no-cache torch --index-url https://download.pytorch.org/whl/cpu
+# 再装其余依赖 (torch 已满足 sentence-transformers 约束, 不会重复拉取 CUDA 版)
 RUN uv pip install --system --no-cache -r pyproject.toml
 
 # ---- 阶段 2: 运行 ----

@@ -69,6 +69,12 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# 检索评测输出 (eval/output/ 下的 JSON/MD 报告)
+backend/eval/output/
+
+# 本地 embedding 模型缓存 (HuggingFace, ~470MB, 首次运行自动下载)
+backend/hf_cache/
+
 # ---- Flutter / Dart ----
 # Client-specific ignores are in client/.gitignore
 
@@ -98,6 +104,6 @@ temp/
 .workbuddy/
 
 # ---- Vue Web ----
-web/node_modules/
-web/dist/
-web/package-lock.json
+front/node_modules/
+front/dist/
+front/package-lock.json

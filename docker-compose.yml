@@ -29,8 +29,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9002:9000"
+      - "9003:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -75,8 +75,8 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "19530:19530"
-      - "9091:9091"
+      - "19531:19530"
+      - "19091:9091"
     depends_on:
       - milvus-etcd
       - milvus-minio
@@ -96,6 +96,12 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      # 国内访问 huggingface.co 受限时用于拉取本地 embedding 模型 (可被 .env 覆盖)
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+      # 使用宿主机持久化好的本地 embedding 模型 (只读), 避免容器内重复下载 ~470MB
+      EMBEDDING_MODEL_NAME: /models/paraphrase-multilingual-MiniLM-L12-v2
+      # hf-mirror 不代理 Xet CAS 服务, 不禁用会 401 导致下载失败
+      HF_HUB_DISABLE_XET: "1"
     ports:
       - "8001:8000"
     depends_on:
@@ -107,6 +113,8 @@ services:
         condition: service_started
     volumes:
       - ./backend:/app
+      # 本地 embedding 模型 (宿主机持久化, 只读挂载; 无需容器内重新下载)
+      - ./backend/models:/models:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 15s
@@ -114,11 +122,11 @@ services:
       retries: 5
       start_period: 30s
 
-  web:
+  front:
     build:
-      context: ./web
+      context: ./front
       dockerfile: Dockerfile
-    container_name: lumos-web
+    container_name: lumos-front
     restart: unless-stopped
     ports:
       - "8080:80"

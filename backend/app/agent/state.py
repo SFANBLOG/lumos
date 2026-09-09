@@ -7,11 +7,10 @@ Agent 状态定义.
 
 from __future__ import annotations
 
-from typing import Annotated
-
 from pydantic import BaseModel, Field
 
 from app.models.analysis import RiskCategory, RiskLevel
+from app.schemas.analysis import SSEEvent
 
 
 # ─── 结构化合同条款 ────────────────────────────────────────────
@@ -103,4 +102,10 @@ class AgentState(BaseModel):
     agent_trace: list[str] = Field(
         default_factory=list,
         description="已执行的子智能体名称列表 (执行轨迹)",
+    )
+    # LangGraph 节点执行期间产生的事件 (THINKING/NODE_COMPLETE/RISK_FOUND),
+    # 由 run_contract_analysis 回放为 SSE 帧; NODE_START 由 runner 按图顺序推送
+    events: list[SSEEvent] = Field(
+        default_factory=list,
+        description="工作流事件累积 (供 SSE 回放与测试断言)",
     )

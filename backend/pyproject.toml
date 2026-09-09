@@ -17,10 +17,13 @@ dependencies = [
 
     # ---- AI / Agent ----
     "langchain-openai>=0.3.0",
+    "langgraph>=0.2.60",  # 合同审查工作流 StateGraph 编排
 
     # ---- RAG & Document ----
-    "chromadb>=0.6.0",
     "pymilvus>=2.4.0",
+    "sentence-transformers>=3.0.0",  # 本地 embedding 模型 (默认 provider=local, 首次缺失自动下载)
+    "rank-bm25>=0.2.2",  # BM25 全文检索 (混合检索关键词通道)
+    "jieba>=0.42.1",  # 中文分词 (BM25 索引构建)
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
@@ -28,7 +31,6 @@ dependencies = [
 
     # ---- Database ----
     "sqlmodel>=0.0.22",
-    "aiosqlite>=0.21.0",
     "aiomysql>=0.2.0",
     "pymysql>=1.1.0",
 
@@ -63,6 +65,9 @@ dev = [
     "mypy>=1.14.0",
     "pre-commit>=4.0.0",
 ]
+
+# 本地真实 embedding 模型已并入主依赖 (provider=local 默认启用, 首次缺失自动下载)。
+# 如需改用 OpenAI 兼容 embedding 接口, 设 EMBEDDING_PROVIDER=api 即可, 无需额外依赖。
 
 postgres = [
     "asyncpg>=0.30.0",
@@ -105,7 +110,11 @@ known-first-party = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --cov=app --cov-report=term-missing --cov-report=html:htmlcov"
+markers = [
+    "e2e: 端到端效果评测 (需要真实 LLM Key, 默认跳过)",
+    "retrieval: 检索链路评测 (基于 data/contracts 金标准, 需要可用 embedding)",
+]
 
 [tool.mypy]
 python_version = "3.12"

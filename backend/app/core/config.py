@@ -51,10 +51,19 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_model_name: str = "deepseek-chat"
 
-    # 嵌入模型 (RAG)
-    embedding_api_key: str = ""
+    # 嵌入模型 (RAG 真实 embedding)
+    # provider: local(默认, sentence-transformers 本地模型) | api(OpenAI 兼容 /embeddings)
+    # 注意: 切换到不同模型/通道后向量索引会按签名自动重建
+    embedding_provider: str = "local"
+    embedding_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
     embedding_base_url: str = "https://api.deepseek.com/v1"
-    embedding_model_name: str = "text-embedding-v3"
+    embedding_api_key: str = ""
+    # 手动指定向量维度; 留空则由模型自动探测 (首次加载后确定)
+    embedding_dim: int | None = None
+
+    # ── 混合检索 (Milvus 向量 + BM25 + RRF 融合) ──────────────
+    hybrid_top_k_ratio: int = 2  # 融合前各通道候选数 = top_k × 该值
+    rrf_k: int = 60  # RRF 融合参数: score = Σ 1/(k + rank)
 
     # ── 多模态视觉模型 (图片/扫描件 OCR) ─────────────────────
     # 复用 OpenAI 兼容接口; DeepSeek 无视觉能力, 默认走通义千问 VL (DashScope 兼容模式)。
@@ -73,6 +82,7 @@ class Settings(BaseSettings):
     # ── Milvus ───────────────────────────────────────────────
     milvus_host: str = "localhost"
     milvus_port: int = 19530
+    # 基集合名; 实际集合名 = 基名 + embedding 签名后缀, 换模型自动隔离重建
     milvus_collection: str = "labor_laws"
 
     # ── MinIO ─────────────────────────────────────────────────

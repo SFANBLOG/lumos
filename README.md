@@ -13,11 +13,12 @@
 - [五、系统架构](#五系统架构)
 - [六、Agent 与 MCP 架构](#六agent-与-mcp-架构)
 - [七、快速开始（Docker / 本地）](#七快速开始docker--本地)
-- [八、环境变量](#八环境变量)
-- [九、API 一览](#九api-一览)
-- [十、项目结构](#十项目结构)
-- [十一、参与贡献](#十一参与贡献)
-- [十二、免责声明与许可证](#十二免责声明与许可证)
+- [八、测试、评测与量化口径](#八测试评测与量化口径)
+- [九、环境变量](#九环境变量)
+- [十、API 一览](#十api-一览)
+- [十一、项目结构](#十一项目结构)
+- [十二、参与贡献](#十二参与贡献)
+- [十三、免责声明与许可证](#十三免责声明与许可证)
 
 ---
 
@@ -47,8 +48,8 @@
 | **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取，PDF/Word 同样支持 |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
-| **Multi-Agent 分析引擎** | Extract → Retrieve → Review → Negotiate 四阶段流水线，每个阶段由独立子智能体专精处理 |
-| **RAG 法规检索** | 基于 Milvus 向量数据库 + 混合检索的中国劳动法条文语义检索，答案可溯源到具体法条 |
+| **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
+| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = Milvus 向量 + BM25（jieba 分词）双通道 → **RRF 融合**，答案可溯源到具体法条 |
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
 | **MCP 协议支持** | 内置 MCP Server，将法条检索、条款分析、风险评分、谈判话术等能力标准化暴露，方便二次开发与外部 Agent 集成 |
@@ -65,7 +66,7 @@
 | Web 智能咨询 | 多轮对话，法条引用标注，追问建议 |
 | Web MCP 工具箱 | MCP 工具列表与调用 |
 
-> 完整截图见 `web/shots/` 目录。
+> 完整截图见 `front/shots/` 目录。
 
 ---
 
@@ -94,13 +95,13 @@
 
 | 技术 | 说明 |
 |:---|:---|
-| FastAPI (Python 3.12) | 极速异步框架 + 自动 Swagger 文档 |
-| LangGraph | 子智能体编排与状态流转 |
-| Supervisor + 4 子智能体 | 编排器架构：Extractor → Retriever → Reviewer → Negotiator |
+| FastAPI (Python 3.12+) | 极速异步框架 + 自动 Swagger 文档 |
+| LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → negotiate，共享 Pydantic `AgentState` |
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
-| Milvus | 向量数据库，劳动法条文语义检索 |
-| ChromaDB | 轻量向量检索降级方案 |
+| 真实 Embedding | `sentence-transformers` 本地模型（默认 `paraphrase-multilingual-MiniLM-L12-v2`）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
+| Milvus | 向量数据库（COSINE，动态维度），不可用时自动降级 ChromaDB |
+| BM25 (jieba) | 法条语料全文关键词通道，与向量通道经 **RRF** 融合 |
 | MinIO | 对象存储，合同文件与扫描件上传 |
 
 ---
@@ -124,14 +125,15 @@
 │                                                           │
 │   [API 网关]  FastAPI Endpoints                           │
 │   [认证授权]  JWT + API Key                               │
-│   [Agent 引擎] Supervisor + 4 子智能体                    │
+│   [Agent 引擎] LangGraph StateGraph（4 节点线性链）        │
 │     ├── 1. Extractor   — 结构化抽取：乱序文本 → 标准条款   │
-│     ├── 2. Retriever   — 法规检索 (RAG)：Key条款 → 法条    │
+│     ├── 2. Retriever   — 混合检索 (RAG)：关键条款 → 法条   │
 │     ├── 3. Reviewer    — 风险审查：多维度打分 + 法律依据    │
 │     └── 4. Negotiator  — 谈判策略：为每条风险生成话术      │
 │   [数据持久化] SQLModel + MySQL 8                          │
 │   [对象存储]   MinIO (PDF/Word/图片上传)                   │
-│   [向量检索]   Milvus (劳动法条文语义检索)                 │
+│   [检索链路]   Milvus→ChromaDB (向量, 真实 embedding)      │
+│                + BM25/jieba (关键词) → RRF 融合            │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -140,51 +142,56 @@
 ```
 用户提交合同文本
  │
- ├─ [Extractor] 文本清洗（OCR 纠错/段落规范化）
+ ├─ [Extractor 节点] 文本清洗（OCR 纠错/段落规范化）
  │   └─ 调用 LLM 将合同拆分为结构化条款（含风险预分类）
  │   └─ LLM 失败时降级为段落分割
  │
- ├─ [Retriever] 对每条已提取条款，通过 MCP law_search 工具
- │   └─ 进行 RAG 语义检索（Milvus 向量 + BM25 混合）
+ ├─ [Retriever 节点] 对每条已提取条款，通过 law_search 工具
+ │   └─ 混合检索：Milvus/Chroma 向量通道 + BM25 关键词通道 → RRF 融合
  │   └─ 去重后排序，填充 legal_references
  │
- ├─ [Reviewer] 构建条款+法条上下文
+ ├─ [Reviewer 节点] 构建条款+法条上下文
  │   └─ 调用 LLM 逐项评估风险（评分/等级/法律依据/谈判话术）
  │   └─ LLM 失败时降级为规则审查
  │
- ├─ [Negotiator] 对缺失 negotiation_tip 的条目
- │   └─ 通过 MCP negotiation 工具填充谈判话术
+ ├─ [Negotiator 节点] 对缺失 negotiation_tip 的条目
+ │   └─ 通过 negotiation 工具填充谈判话术
  │
- └─ [格式化输出] SSE 事件流 → 前端风险卡片展示
+ └─ [格式化输出] 节点事件沿 SSE 事件流回放 → 前端风险卡片展示
 ```
+
+各节点通过 `graph.astream` 推进：节点内产生的 `THINKING / NODE_COMPLETE / RISK_FOUND` 事件按序累积进 `state.events`，runner 增量回放，`NODE_START` 按图顺序预推——保持「节点开始 → 思考 → 完成」的原始时间线语义。任一节点异常不中断全图：子智能体捕获错误写入 `state.errors` 并转为 `THINKING` 警告事件继续执行。
 
 ---
 
 ## 六、Agent 与 MCP 架构
 
-### 6.1 Supervisor + 4 个子智能体
+### 6.1 LangGraph 工作流（4 个节点，由子智能体执行）
 
 ```
-SupervisorAgent（编排器，不继承 BaseAgent）
- │
- ├─ 🔧 ExtractorAgent  — 文本抽取/OCR纠错/条款结构化
- │   └─ skills: text_preprocessing
- │
- ├─ 📚 RetrieverAgent  — 法规检索（RAG）
- │   └─ MCP 工具: law_search
- │
- ├─ ⚖️ ReviewerAgent   — 风险审查/评分
- │   └─ skills: legal_analysis, risk_scoring
- │   └─ MCP 工具: risk_assess, clause_analyze
- │
- └─ 💬 NegotiatorAgent — 谈判策略生成
-     └─ MCP 工具: negotiation
+StateGraph(AgentState)
+ │   START
+ ▼
+ ├─ 📝 extractor    — ExtractorAgent  （文本抽取/OCR纠错/条款结构化）
+ │     └─ skills: text_preprocessing
+ ▼
+ ├─ 📚 retriever    — RetrieverAgent  （混合法规检索 RAG）
+ │     └─ 工具: law_search
+ ▼
+ ├─ ⚖️ reviewer     — ReviewerAgent   （风险审查/评分）
+ │     └─ skills: legal_analysis, risk_scoring
+ │     └─ 工具: risk_assess, clause_analyze
+ ▼
+ └─ 💬 negotiator   — NegotiatorAgent （谈判策略生成）
+       └─ 工具: negotiation
+ ▼
+ END
 ```
 
-| 子智能体 | key | 擅长场景 |
+| 节点 / 子智能体 | key | 擅长场景 |
 |---|---|---|
 | ExtractorAgent | `extractor` | 合同文本清洗、OCR 纠错、条款结构化拆分 |
-| RetrieverAgent | `retriever` | 劳动法条文语义检索、RAG 召回 |
+| RetrieverAgent | `retriever` | 劳动法条文混合检索（向量 + BM25 + RRF）、RAG 召回 |
 | ReviewerAgent | `reviewer` | 风险多维度打分、法律依据生成、谈判话术 |
 | NegotiatorAgent | `negotiator` | 补充谈判话术，确保每条风险都有应对策略 |
 
@@ -193,6 +200,8 @@ SupervisorAgent（编排器，不继承 BaseAgent）
 | 智能体 | key | 用途 |
 |---|---|---|
 | ConsultantAgent | `consultant` | 独立于合同分析流的智能咨询模块，支持多轮对话、法条引用、追问建议 |
+
+工作流实现在 `backend/app/agent/graph.py`（`build_contract_graph` 编译图 + `run_contract_analysis` SSE 运行器），节点动作由 `_node_action` 统一包装——子智能体执行 + 错误捕获 + 事件累积。
 
 ### 6.2 技能系统（Skills）
 
@@ -210,7 +219,7 @@ SupervisorAgent（编排器，不继承 BaseAgent）
 
 | 工具 | 说明 | 数据来源 |
 |---|---|---|
-| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/retriever.py` 混合检索（Milvus + BM25） |
+| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：向量（Milvus→Chroma）+ BM25 → RRF |
 | `risk_assess` | 对结构化条款进行风险评分与法律依据匹配 | ReviewerAgent 内部逻辑 |
 | `clause_analyze` | 对单一条款进行深度分析 | LLM + 法条上下文 |
 | `negotiation` | 为风险条款生成可执行谈判话术 | LLM 生成 |
@@ -231,11 +240,12 @@ SupervisorAgent（编排器，不继承 BaseAgent）
 
 | 事件 | 载荷 | 说明 |
 |---|---|---|
-| `NODE_START` | `{node_name, description, progress}` | 子智能体开始执行 |
-| `NODE_COMPLETE` | `{node_name, description, progress}` | 子智能体执行完成 |
+| `NODE_START` | `{node_name, description, progress}` | 节点开始执行（runner 按图顺序预推） |
+| `NODE_COMPLETE` | `{node_name, description, progress}` | 节点执行完成 |
 | `THINKING` | `{content}` | 节点出错时推送警告 |
 | `RISK_FOUND` | `{category, level, title, explanation, ...}` | 逐条推送风险评估结果 |
 | `SUMMARY` | `{overall_score, overall_level, summary, ...}` | 分析完成推送总计 |
+| `ERROR` | `{message}` | 工作流级异常 |
 | `COMPLETE` | — | 流程结束 |
 
 ---
@@ -273,7 +283,7 @@ docker compose logs -f backend
 | `milvus-minio` | minio/minio:latest | — | Milvus 对象存储 |
 | `milvus-standalone` | milvusdb/milvus:v2.4.0 | 19530 | 向量数据库 |
 | `backend` | 本地构建 | 8001 → 8000 | FastAPI AI 服务端 |
-| `web` | 本地构建 | 8080 → 80 | Nginx 托管 Web 前端 |
+| `front` | 本地构建 | 8080 → 80 | Nginx 托管 Web 前端 |
 
 **访问地址**
 
@@ -289,9 +299,9 @@ docker compose logs -f backend
 
 ```bash
 cd backend
-pip install -e ".[dev]"
+pip install -e ".[dev]"     # 含 embedding extra（sentence-transformers 等）
 cp .env.example .env
-# 编辑 .env 填入 AI API Key 等配置
+# 编辑 .env 填入 AI API Key 等配置（默认 embedding_provider=local，首次检索会下载模型）
 uvicorn app.main:app --reload
 ```
 
@@ -311,32 +321,86 @@ flutter pub get
 flutter run
 ```
 
+> ⚠️ 本地网络无法直连 HuggingFace 时，embedding 模型下载可走镜像：`$env:HF_ENDPOINT='https://hf-mirror.com'`（PowerShell）或 `export HF_ENDPOINT=https://hf-mirror.com`（bash）。
+
 ---
 
-## 八、环境变量
+## 八、测试、评测与量化口径
+
+### 8.1 自动化测试与覆盖率
+
+```bash
+cd backend
+python -m pytest                       # 全部用例（单元 + 冒烟）
+python -m pytest --cov=app             # 覆盖率（HTML 报告输出至 htmlcov/）
+python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用例
+LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
+```
+
+- 当前 **27 条 pytest 用例**（默认跑 25 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、Milvus 失败降级 Chroma、LangGraph 状态流转与错误恢复（见 `backend/tests/`）；
+- 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
+
+### 8.2 离线检索效果评测（hit@k / MRR）
+
+```bash
+cd backend
+python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_eval_latest.{md,json}
+```
+
+评测以 `data/contracts/` 下 **90 份单分类金标准合同**（高危/警惕/关注三区 × 9 类风险 × 10 份）为样本：从合同文本抽取风险句作为查询，分别跑 **向量 / BM25 / 混合** 三个通道，统计 `hit@1/3/5` 与 `MRR@5`。**2026-09-08 实测**（真实 embedding，29 条法条文语料）：
+
+| 通道 | hit@1 | hit@3 | hit@5 | MRR@5 |
+| :--- | :--- | :--- | :--- | :--- |
+| 向量（真实 embedding） | 0.533 | 0.667 | 0.856 | 0.628 |
+| BM25（jieba 领域词典） | 0.322 | 0.433 | 0.700 | 0.437 |
+| 混合（RRF 融合） | 0.489 | 0.611 | **0.878** | 0.597 |
+
+如实解读：RRF 融合将 hit@5 提升至 **87.8%**（召回广度收益）；小语料下 BM25 噪音会拉低榜首精度，hit@1/MRR 略低于纯向量——扩大语料 / 调优 `rrf_k` 是后续方向（重新运行本命令即可复现最新数字）。
+
+### 8.3 量化口径边界
+
+请严格区分两类指标：
+
+- **开发规模指标**：`backend/app` 行数、模块数、测试语料份数、用例条数等——它们只能说明交付体量与工程完备度；
+- **效果指标**：检出率 / 准确率 / `hit@k` / `MRR` / 时延——必须由评测脚本跑出真实数字（如 8.2），仓库内所有宣称的效果均可通过 `backend/eval/` 复现。
+
+任何将「写了 XX 行代码 / 建了 XX 份语料」表述为「准确率达 XX%」的说法都是口径错误。
+
+---
+
+## 九、环境变量
+
+> 完整模板见根目录 `.env.example`（Docker Compose 用）与 `backend/.env.example`（本地后端用）。
 
 | 分组 | 变量 | 默认值 | 说明 |
 |---|---|---|---|
 | 应用 | `APP_ENV` | `development` | 运行环境 |
 | | `LOG_LEVEL` | `DEBUG` | 日志级别 |
-| 数据库 | `DATABASE_URL` | `mysql+aiomysql://lumos:lumos@localhost:3306/lumos` | MySQL 连接串 |
-| | `MYSQL_ROOT_PASSWORD` | `root` | MySQL root 密码 |
+| 数据库 | `DATABASE_URL` | `mysql+aiomysql://lumos:lumos@localhost:3306/lumos` | MySQL 连接串（Docker 部署时宿主端口为 3308） |
 | LLM | `LLM_API_KEY` | （必填） | AI 模型 API Key |
 | | `LLM_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI 兼容接口地址 |
 | | `LLM_MODEL_NAME` | `deepseek-chat` | 模型名称 |
-| 安全 | `JWT_SECRET_KEY` | `change-me-in-production` | JWT 签名密钥 |
+| Embedding | `EMBEDDING_PROVIDER` | `local` | `local`（sentence-transformers 本地）\| `api`（OpenAI 兼容 /embeddings） |
+| | `EMBEDDING_MODEL_NAME` | `paraphrase-multilingual-MiniLM-L12-v2` | 模型名（`api` 模式为接口模型 ID） |
+| | `EMBEDDING_API_KEY` | （空） | `api` 模式密钥 |
+| | `EMBEDDING_BASE_URL` | `https://api.deepseek.com/v1` | `api` 模式接口地址 |
+| | `EMBEDDING_DIM` | （空） | 手动指定向量维度；留空则由模型自动探测 |
+| 混合检索 | `HYBRID_TOP_K_RATIO` | `2` | 融合前各通道候选数 = top_k × 该值 |
+| | `RRF_K` | `60` | RRF 融合参数：score = Σ 1/(k + rank) |
+| 视觉 OCR | `LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL` / `LLM_VISION_MODEL_NAME` | qwen-vl / DashScope | 图片文字抽取（未配置时回退 Tesseract） |
+| | `IMAGE_OCR_STRATEGY` | `auto` | `auto` \| `llm` \| `tesseract` |
+| 安全 | `API_SECRET_KEY` | （空，置空关闭鉴权） | 业务鉴权密钥 |
+| | `JWT_SECRET_KEY` | `change-me-in-production` | JWT 签名密钥 |
 | | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | Token 过期时间（7 天） |
-| Milvus | `MILVUS_HOST` | `localhost` | 向量数据库地址 |
-| | `MILVUS_PORT` | `19530` | 向量数据库端口 |
-| | `MILVUS_COLLECTION` | `labor_laws` | 集合名称 |
+| Milvus | `MILVUS_HOST` / `MILVUS_PORT` | `localhost:19530` | 向量数据库地址 |
+| | `MILVUS_COLLECTION` | `labor_laws` | 集合**基名**；实际集合 = 基名 + embedding 签名，换模型自动隔离重建 |
 | MinIO | `MINIO_ENDPOINT` | `localhost:9000` | 对象存储地址 |
-| | `MINIO_ACCESS_KEY` | `minioadmin` | 访问密钥 |
-| | `MINIO_SECRET_KEY` | `minioadmin` | 秘密密钥 |
+| | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `minioadmin` | 访问密钥 |
 | | `MINIO_BUCKET` | `lumos` | 存储桶名称 |
 
 ---
 
-## 九、API 一览
+## 十、API 一览
 
 | 模块 | 方法 | 端点 | 描述 |
 |:---|:---|:---|:---|
@@ -364,7 +428,7 @@ flutter run
 
 ---
 
-## 十、项目结构
+## 十一、项目结构
 
 ```
 lumos/
@@ -373,7 +437,7 @@ lumos/
 ├── .env.example                       # 环境变量模板
 ├── .gitignore
 │
-├── client/                            # Flutter 移动端（iOS/Android）
+├── archive/client/                    # 遗留 Flutter 移动端（已归档，原 client/）
 │   └── lib/
 │       ├── core/                      # API、状态、路由、主题
 │       ├── features/                  # 业务功能模块（analysis/home/main/mcp/report/scanner/splash）
@@ -393,33 +457,43 @@ lumos/
 │
 ├── backend/                           # Python FastAPI 服务端
 │   ├── app/
-│   │   ├── agent/                     # Multi-Agent 编排
-│   │   │   ├── base.py               # 子智能体抽象基类 BaseAgent
-│   │   │   ├── supervisor.py         # 编排器 SupervisorAgent
-│   │   │   ├── graph.py              # 工作流入口 run_contract_analysis()
-│   │   │   ├── state.py              # LangGraph AgentState
-│   │   │   ├── llm.py                # LLM 客户端工厂（ChatOpenAI / Vision）
-│   │   │   └── sub_agents/           # 子智能体（Extractor/Retriever/Reviewer/Negotiator/Consultant）
-│   │   ├── api/v1/                   # FastAPI 路由
+│   │   ├── agent/                     # LangGraph 编排层
+│   │   │   ├── graph.py               # StateGraph 构建 + SSE 运行器 run_contract_analysis
+│   │   │   ├── state.py               # LangGraph AgentState（共享状态 + events 通道）
+│   │   │   ├── base.py                # 子智能体抽象基类 BaseAgent
+│   │   │   ├── llm.py                 # LLM 客户端工厂（ChatOpenAI / Vision）
+│   │   │   └── sub_agents/            # Extractor/Retriever/Reviewer/Negotiator/Consultant
+│   │   ├── rag/                       # 混合检索（真实 embedding + Milvus/Chroma + BM25 + RRF）
+│   │   │   ├── embeddings.py          # 双 Provider embedding（local / API），签名隔离
+│   │   │   ├── milvus_store.py        # Milvus 集合管理 + 检索（COSINE/动态维度）
+│   │   │   ├── vector_store.py        # 混合检索入口 search_laws + ChromaDB 降级
+│   │   │   ├── bm25_index.py          # BM25 全文检索（jieba 分词 + 法律领域词典）
+│   │   │   ├── hybrid.py              # RRF 融合（Reciprocal Rank Fusion）
+│   │   │   └── law_corpus.py          # 劳动法规条文语料（内容哈希）
+│   │   ├── api/v1/                    # FastAPI 路由
 │   │   ├── core/                      # 配置、数据库、安全、MinIO
-│   │   ├── mcp/                      # MCP 协议（Server/Client/Tools）
-│   │   ├── models/                   # 数据模型（SQLModel）
-│   │   ├── rag/                      # 向量检索（Milvus/ChromaDB/BM25）
-│   │   └── skills/                   # 可复用技能
-│   ├── tests/                        # 测试
-│   └── pyproject.toml
+│   │   ├── mcp/                       # MCP 协议（Server/Client/Tools）
+│   │   ├── models/                    # 数据模型（SQLModel）
+│   │   ├── schemas/                   # Pydantic 出入参 / SSE 事件协议
+│   │   ├── services/                  # 文本摄取（16 种格式 + OCR）
+│   │   └── skills/                    # 可复用技能
+│   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
+│   │   └── retrieval_eval.py
+│   ├── tests/                         # 27 条 pytest 用例（25 默认 + 2 e2e marker）
+│   ├── pyproject.toml
+│   └── .env.example
 │
 ├── docs/                              # 项目文档
-│   └── technical-design.md           # 技术设计方案
+│   └── technical-design.md            # 技术设计方案（含实现现状附录）
 │
-├── data/                              # 测试数据（100 份中文合同样本）
+├── data/contracts/                    # 测试语料（100 份中文合同，高危/警惕/关注/综合分区）
 │
 └── public/                            # 静态资源
 ```
 
 ---
 
-## 十一、参与贡献
+## 十二、参与贡献
 
 Lumos 是一个为劳动者发声的公益开源项目，我们需要多元化的力量：
 
@@ -431,7 +505,7 @@ Lumos 是一个为劳动者发声的公益开源项目，我们需要多元化�
 
 ---
 
-## 十二、免责声明与许可证
+## 十三、免责声明与许可证
 
 ### 免责声明
 

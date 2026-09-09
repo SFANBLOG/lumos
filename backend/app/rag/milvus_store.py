@@ -1,11 +1,15 @@
 """
-Milvus 向量库封装.
+Milvus 向量库封装 (混合检索的向量通道).
 
-替代 ChromaDB，用于存储劳动法条文的向量表示，支持语义检索。
+- 向量由真实 embedding 模型产出 (见 ``app.rag.embeddings``), 非占位随机向量;
+- 度量统一为 COSINE (向量已归一化), 检索返回余弦相似度;
+- 集合名 = 基名 + embedding 签名后缀, 切换模型/通道时自动隔离重建,
+  避免不同向量空间的数据混在同一集合中。
 """
 
 from __future__ import annotations
 
+import hashlib
 from functools import lru_cache
 
 from loguru import logger
@@ -19,11 +23,16 @@ from pymilvus import (
 )
 
 from app.core.config import get_settings
+from app.rag.embeddings import embedding_dim, embedding_signature, embed_query, embed_texts
 from app.rag.law_corpus import ALL_LAWS
 
 settings = get_settings()
 
-_DIM = 384  # all-MiniLM-L6-v2 维度 (后续可配置)
+
+def collection_full_name() -> str:
+    """实际集合名: 基名 + embedding 签名哈希 (8 位)."""
+    sig_hash = hashlib.sha256(embedding_signature().encode("utf-8")).hexdigest()[:8]
+    return f"{settings.milvus_collection}_{sig_hash}"
 
 
 def _connect() -> None:
@@ -35,12 +44,17 @@ def _connect() -> None:
     )
 
 
-@lru_cache
-def get_milvus_collection() -> Collection:
-    """获取或创建法律条文集合."""
-    _connect()
+def _drop_legacy_collection(full_name: str) -> None:
+    """清理旧版同名集合 (无签名后缀, 由占位向量时代的代码创建)."""
+    base = settings.milvus_collection
+    if base != full_name and utility.has_collection(base):
+        logger.warning(f"🧹 检测到旧版集合 {base} (占位向量时代产物), 自动删除")
+        utility.drop_collection(base)
 
-    collection_name = settings.milvus_collection
+
+def _build_schema() -> tuple[CollectionSchema, int]:
+    """构建集合 Schema (维度动态取自真实 embedding 模型)."""
+    dim = embedding_dim()
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
         FieldSchema(name="law_name", dtype=DataType.VARCHAR, max_length=128),
@@ -48,69 +62,93 @@ def get_milvus_collection() -> Collection:
         FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=4096),
         FieldSchema(name="keywords", dtype=DataType.VARCHAR, max_length=1024),
         FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=128),
-        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=_DIM),
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
     ]
-    schema = CollectionSchema(fields, description="劳动法条文向量库")
+    schema = CollectionSchema(fields, description="劳动法条文向量库 (真实 embedding)")
+    return schema, dim
 
-    if collection_name not in utility.list_collections():
-        collection = Collection(name=collection_name, schema=schema)
-        index_params = {
-            "index_type": "IVF_FLAT",
-            "metric_type": "L2",
-            "params": {"nlist": 128},
-        }
-        collection.create_index(field_name="embedding", index_params=index_params)
+
+def _create_index(collection: Collection) -> None:
+    """创建 COSINE 向量索引并加载."""
+    index_params = {
+        "index_type": "IVF_FLAT",
+        "metric_type": "COSINE",
+        "params": {"nlist": 128},
+    }
+    collection.create_index(field_name="embedding", index_params=index_params)
+    collection.load()
+
+
+def _corpus_drifted(collection: Collection) -> bool:
+    """语料漂移检测: 条数不一致或首条内容不一致时重建."""
+    if collection.num_entities != len(ALL_LAWS):
+        return True
+    first = collection.query(expr="id > 0", limit=1, output_fields=["law_name", "content"])
+    if not first:
+        return True
+    sample = ALL_LAWS[0]
+    hit = first[0]
+    return hit.get("law_name") != sample["law_name"] or hit.get("content") != sample["content"]
+
+
+@lru_cache
+def get_milvus_collection() -> Collection:
+    """获取 (必要时创建/重建) 法律条文向量集合."""
+    _connect()
+    _drop_legacy_collection(collection_full_name())
+
+    name = collection_full_name()
+    schema, dim = _build_schema()
+
+    if utility.has_collection(name):
+        collection = Collection(name)
         collection.load()
-        logger.info(f"🆕 Milvus 集创建: {collection_name}")
+        if _corpus_drifted(collection):
+            logger.info(f"🔄 法条语料/embedding 已变化, 重建集合: {name}")
+            collection.release()
+            utility.drop_collection(name)
+            collection = Collection(name, schema=schema)
+            _create_index(collection)
+        else:
+            logger.info(f"✅ Milvus 集合就绪 | {name} | dim={dim} | {collection.num_entities} 条")
     else:
-        collection = Collection(collection_name)
-        collection.load()
+        collection = Collection(name, schema=schema)
+        _create_index(collection)
+        logger.info(f"🆕 Milvus 集创建: {name} | dim={dim}")
 
     return collection
 
 
-def _simple_embedding(texts: list[str]) -> list[list[float]]:
-    """占位 embedding: 随机向量 (生产环境应使用 sentence-transformers 或 API)."""
-    import random
-
-    random.seed(42)
-    return [[random.uniform(-1, 1) for _ in range(_DIM)] for _ in texts]
-
-
 def init_milvus() -> None:
-    """加载法条到 Milvus."""
+    """将法条语料向量化写入 Milvus (幂等)."""
     try:
         collection = get_milvus_collection()
         if collection.num_entities > 0:
             logger.info(f"✅ Milvus 已就绪 | 条文: {collection.num_entities} 条")
             return
 
-        contents = []
-        law_names = []
-        articles = []
-        keywords = []
-        categories = []
+        law_names, articles, contents, keywords, categories = [], [], [], [], []
+        texts = []
         for law in ALL_LAWS:
-            contents.append(law["content"])
+            keywords_str = ", ".join(law.get("keywords", []))
             law_names.append(law["law_name"])
             articles.append(law["article"])
+            contents.append(law["content"])
+            keywords.append(keywords_str)
             categories.append(law.get("category", ""))
-            keywords.append(", ".join(law.get("keywords", [])))
+            # 向量化文本 = 法条全文 (名称/编号/正文/关键词), 与 BM25 文档同构
+            texts.append(
+                f"{law['law_name']} {law['article']} {law['content']} {keywords_str}"
+            )
 
-        embeddings = _simple_embedding(contents)
+        logger.info(f"🧠 向量化 {len(texts)} 条法条 (模型: {embedding_signature()})…")
+        vectors = embed_texts(texts)
 
         collection.insert(
-            [
-                law_names,
-                articles,
-                contents,
-                keywords,
-                categories,
-                embeddings,
-            ]
+            [law_names, articles, contents, keywords, categories, vectors]
         )
         collection.flush()
-        logger.info(f"✅ Milvus 加载完成 | 条文: {len(contents)} 条")
+        logger.info(f"✅ Milvus 加载完成 | 条文: {len(contents)} 条 | dim={len(vectors[0])}")
     except Exception as e:
         logger.error(f"❌ Milvus 初始化失败: {e}")
         raise
@@ -121,30 +159,35 @@ def search_milvus(
     n_results: int = 5,
     category: str | None = None,
 ) -> list[dict]:
-    """语义检索法律条文."""
+    """向量通道语义检索 (余弦相似度降序)."""
     collection = get_milvus_collection()
-    query_vector = _simple_embedding([query])
+    query_vector = embed_query(query)
 
-    search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+    expr = f'category == "{category}"' if category else None
+    search_params = {
+        "metric_type": "COSINE",
+        "params": {"nprobe": 16},
+    }
     results = collection.search(
-        data=query_vector,
+        data=[query_vector],
         anns_field="embedding",
         param=search_params,
         limit=n_results,
+        expr=expr,
         output_fields=["law_name", "article", "content", "keywords", "category"],
     )
 
-    matches = []
+    matches: list[dict] = []
     for result in results[0]:
         entity = result.entity
-        if category and entity.get("category") != category:
-            continue
+        # COSINE: distance = 1 - cos_sim; 向量已归一化, 数值稳定
+        similarity = round(1.0 - result.distance, 4)
         matches.append({
             "law_name": entity.get("law_name"),
             "article": entity.get("article"),
             "content": entity.get("content"),
             "keywords": entity.get("keywords"),
             "category": entity.get("category"),
-            "similarity": 1 / (1 + result.distance),
+            "score": similarity,
         })
     return matches

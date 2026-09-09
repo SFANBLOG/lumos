@@ -10,12 +10,12 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column, Text
+from sqlalchemy import Column
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, Relationship, SQLModel
 
-# 长文本列统一用 MEDIUMTEXT (MySQL) / TEXT (sqlite), 避免 str 默认 VARCHAR(255) 截断
-MEDIUM_TEXT = MEDIUMTEXT().with_variant(Text, "sqlite")
+# 长文本列统一用 MEDIUMTEXT (MySQL), 避免 str 默认 VARCHAR(255) 截断
+MEDIUM_TEXT = MEDIUMTEXT()
 
 
 class RiskLevel(str, Enum):

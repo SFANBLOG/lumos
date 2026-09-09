@@ -9,11 +9,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, Text
+from sqlalchemy import Column
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, SQLModel
 
-MEDIUM_TEXT = MEDIUMTEXT().with_variant(Text, "sqlite")
+MEDIUM_TEXT = MEDIUMTEXT()
 
 
 class ConsultSession(SQLModel, table=True):

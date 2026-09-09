@@ -6,9 +6,16 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import pytest
+
+# 保证从任意目录运行 pytest 都能解析 backend 根下的 app 包
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,13 +24,18 @@ from sqlmodel import SQLModel
 from app.core.database import get_session
 from app.main import create_app
 
-# 测试用内存数据库
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+# 测试数据库: 不再使用 SQLite, 改用 MySQL (docker-compose 或本机 MySQL)。
+# 可用环境变量 TEST_DATABASE_URL 覆盖 (默认指向 docker-compose 暴露的 3308 端口)。
+import os
+
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL", "mysql+aiomysql://lumos:lumos@localhost:3308/lumos"
+)
 
 
 @pytest.fixture
 async def async_session() -> AsyncGenerator[AsyncSession, None]:
-    """测试用数据库会话 (内存 SQLite)."""
+    """测试用数据库会话 (MySQL)."""
     engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 
     async with engine.begin() as conn:

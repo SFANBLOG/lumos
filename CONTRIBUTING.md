@@ -113,7 +113,7 @@ uvicorn app.main:app --reload
 
 - `client` — Flutter 客户端相关
 - `server` — Python 服务端相关
-- `web` — Vue 3 Web 前端相关
+- `front` — Vue 3 Web 前端相关（原 web/）
 - `docs` — 文档
 - `legal` — 法律条款库
 
@@ -189,7 +189,7 @@ lumos/
 │       ├── core/       # API、状态、路由、主题
 │       ├── features/   # 业务功能模块
 │       └── shared/     # 公共组件
-├── web/             # Vue 3 Web 前端
+├── front/           # Vue 3 Web 前端（原 web/）
 ├── backend/         # Python FastAPI 服务端
 │   ├── app/
 │   │   ├── agent/      # Multi-Agent 分析引擎
