@@ -7,7 +7,7 @@
 - 从合同文本中自动抽取「风险句」作为查询 (命中类别触发词的第一个句子)。
 
 对每个查询分别以三种通道检索法条库 (29 条条文, 5 部法律):
-- ``vector``: 仅向量通道 (Milvus → ChromaDB 降级, 真实 embedding);
+- ``vector``: 仅向量通道 (Milvus, 真实 embedding);
 - ``bm25``:  仅 BM25 关键词通道 (jieba 分词);
 - ``hybrid``: 两通道 RRF 融合 (生产环境实际入口 search_laws)。
 

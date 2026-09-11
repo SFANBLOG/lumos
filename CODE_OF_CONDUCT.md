@@ -34,7 +34,7 @@
 
 ## 执行
 
-可以通过 [GitHub Issues](https://github.com/7836246/lumos/issues) 向社区领导者报告辱骂、骚扰或其他不可接受的行为。
+可以通过 [Gitee Issues](https://gitee.com/BLOGSFan/lumos/issues) 向社区领导者报告辱骂、骚扰或其他不可接受的行为；涉及个人隐私的内容请改用邮件联系维护者。
 
 所有投诉都将及时、公正地审查和调查。所有社区领导者都有义务尊重任何事件报告者的隐私和安全。
 

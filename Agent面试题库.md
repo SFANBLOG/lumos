@@ -9,7 +9,7 @@
 | 板块 | 题目范围 | 覆盖提问点 |
 | --- | --- | --- |
 | 一、Agent 基础概念 | Q1 ~ Q14 | 什么是 Agent、和 LLM/RAG/工作流区别、四要素、ReAct、Planning、记忆、幻觉 |
-| 二、项目架构与工作流 | Q15 ~ Q24 | 业务背景、为什么用 Agent、Supervisor 编排、全链路、SSE、四大子智能体 |
+| 二、项目架构与工作流 | Q15 ~ Q24 | 业务背景、为什么用 Agent、LangGraph StateGraph 编排、全链路、SSE、四大子智能体 |
 | 三、状态设计与数据模型 | Q25 ~ Q32 | AgentState、Pydantic 模型、状态流转、字段设计、SQLModel 持久化 |
 | 四、子智能体逐个拆解 | Q33 ~ Q42 | Extractor / Retriever / Reviewer / Negotiator / Consultant 每个的实现与设计 |
 | 五、法律检索与 RAG | Q43 ~ Q54 | Retriever 检索策略、Milvus 字段/索引/隔离、Embedding、语料库、检索质量 |
@@ -47,7 +47,7 @@ AI Agent  = 具备「感知 → 规划 → 行动 → 观察」闭环的智能�
 
 ```text
 1. 大脑（LLM）：负责推理决策 —— Lumos 用 ChatOpenAI(DeepSeek, temp=0.1)
-2. 规划（Planning）：拆解任务 —— SupervisorAgent 编排 4 个子智能体
+2. 规划（Planning）：拆解任务 —— LangGraph StateGraph 编排 4 个节点（子智能体）
 3. 工具（Tools）：行动能力 —— MCP 四工具 law_search / clause_analyze / risk_assess / negotiation
 4. 记忆/状态（State）：上下文 —— AgentState + 会话历史落库
 ```
@@ -81,7 +81,7 @@ ReAct = Reasoning + Acting：模型「先想(Thought)再动(Action)」，
 看到工具结果(Observation)后继续想，形成循环。
 ```
 
-- Lumos **没有用模型自由 ReAct 循环**，用的是**显式编排**（Supervisor 顺序驱动子智能体）。
+- Lumos **没有用模型自由 ReAct 循环**，用的是**显式编排**（LangGraph StateGraph 线性链驱动子智能体）。
 - 原因：合同审查要严格按「抽取 → 检索 → 评估 → 话术」推进，流程不能发散。
 - 面试话术：ReAct 适合开放探索场景；我们这类**强流程场景**更适合 Workflow/编排型 Agent，二者选型依据是「任务结构是否确定」。
 
@@ -91,10 +91,10 @@ ReAct = Reasoning + Acting：模型「先想(Thought)再动(Action)」，
 
 | 模式 | 描述 | 适用 | Lumos 对应 |
 | --- | --- | --- | --- |
-| Workflow 编排 | 步骤写死，模型只做单点 | 流程确定、高合规 | ✅ Supervisor 顺序编排 |
-| Plan-and-Execute | 先出计划再执行 | 长任务 | 类似：Supervisor 预定义执行计划 |
+| Workflow 编排 | 步骤写死，模型只做单点 | 流程确定、高合规 | ✅ LangGraph StateGraph 线性链 |
+| Plan-and-Execute | 先出计划再执行 | 长任务 | 类似：StateGraph 预定义图执行 |
 | ReAct | 想一步动一步 | 开放探索 | 咨询子智能体部分使用 |
-| Supervisor/Sub-Agent | 中心调度+专业分工 | 复杂多角色 | ✅ 4 个子智能体 |
+| Supervisor/Sub-Agent | 中心调度+专业分工 | 复杂多角色 | ✅ 图节点包装 4 个子智能体 |
 | Reflection | 自审/他审重试 | 要求质量 | 降级后规则兜底，未做反思循环 |
 
 ---
@@ -271,7 +271,7 @@ Lumos·契光鉴微：免费的 AI 劳动合同风险排查助手，站在劳动
 痛点：审合同贵(500-2000元)、法言法语看不懂、不敢问 HR。
 核心功能：拍照/上传合同 → 端侧OCR脱敏 → 后端 Agent 深度审查 →
          识别 10 类坑点 → 逐条风险卡片(红黄绿灯) → 生成谈判话术。
-技术栈：Flutter(客户端, mlkit OCR+脱敏) + FastAPI + LangGraph风格编排
+技术栈：Flutter(客户端, mlkit OCR+脱敏) + FastAPI + 真 LangGraph(StateGraph)编排
         + Milvus(法条库) + MCP(工具层) + SQLModel(MySQL) + Docker Compose。
 ```
 
@@ -301,13 +301,14 @@ Lumos·契光鉴微：免费的 AI 劳动合同风险排查助手，站在劳动
                            │ 脱敏纯文本(SSE 流式接收)
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ FastAPI（api/v1/contracts.py → stream_analysis）              │
+│ FastAPI（api/v1/contracts.py → run_contract_analysis）        │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │ SupervisorAgent（编排 + 发 SSE）                         │ │
-│  │  ① ExtractorAgent   抽取/纠错/分类 → 条款列表            │ │
-│  │  ② RetrieverAgent   每条条款 → MCP law_search → 法条     │ │
-│  │  ③ ReviewerAgent    条款+法条 → JSON 风险评估/打分        │ │
-│  │  ④ NegotiatorAgent  风险 → 谈判话术填充                  │ │
+│  │ LangGraph StateGraph（compile 后 astream 编排 + SSE）    │ │
+│  │  extract → retrieve → review → negotiate 四节点线性链    │ │
+│  │  ① extractor    抽取/纠错/分类 → 条款列表                │ │
+│  │  ② retriever    每条条款 → MCP law_search → 法条         │ │
+│  │  ③ reviewer     条款+法条 → JSON 风险评估/打分           │ │
+│  │  ④ negotiator   风险 → 谈判话术填充                      │ │
 │  └─────────────────────────────────────────────────────────┘ │
 │  中间件：rate_limit / logging / metrics / error_handler      │
 └──────────────┬───────────────────────────────┬──────────────┘
@@ -318,30 +319,33 @@ Lumos·契光鉴微：免费的 AI 劳动合同风险排查助手，站在劳动
 
 ---
 
-# **18、Supervisor 编排是怎么实现的？（⭐⭐）**
+# **18、LangGraph 工作流是怎么实现的？（⭐⭐）**
 
 ```python
-class SupervisorAgent:
-    def __init__(self):
-        self._agents = [ExtractorAgent(), RetrieverAgent(),
-                        ReviewerAgent(), NegotiatorAgent()]
-
-    async def run(self, contract_id, raw_text, session=None):
-        state = AgentState(contract_id=contract_id, raw_text=raw_text)
-        for idx, agent in enumerate(self._agents):
-            yield SSEEvent(event=SSEEventType.NODE_START, ...)   # 节点开始
-            state = await agent(state)                            # 顺序执行
-            if state.errors:                                      # 出错也继续
-                yield SSEEvent(event=SSEEventType.THINKING, ...)
-            yield SSEEvent(event=SSEEventType.NODE_COMPLETE, ...) # 节点完成
-            if agent.name == "reviewer":
-                for risk in state.risk_assessments:               # 逐条推风险
-                    yield SSEEvent(event=SSEEventType.RISK_FOUND, data=risk)
-        yield SSEEvent(event=SSEEventType.SUMMARY, ...)           # 总结
-        yield SSEEvent(event=SSEEventType.COMPLETE, ...)          # 完成
+# app/agent/graph.py：StateGraph 四节点线性链（extract → retrieve → review → negotiate）
+@lru_cache
+def build_contract_graph():
+    graph = StateGraph(AgentState)                        # 共享 Pydantic AgentState
+    for name, _ in _NODE_SEQ:
+        graph.add_node(name, _node_action(_AGENTS[name]))  # 节点 = 包装一个子智能体
+    graph.add_edge(START, "extractor")
+    graph.add_edge("negotiator", END)                     # 线性链：START→…→END
+    return graph.compile()                                # 进程级单例编译
 ```
 
-> **面试追问**：子智能体报错为什么不停？答：单条链路失败不能浪费用户前面步骤——Extractor 失败则 Reviewer 无输入，直接给错误提示；但若 Reviewer 失败还有法条可展示，就降级。原则是**尽可能输出部分可用结果**。
+```python
+# 执行器：graph.astream 逐节点推进，回放节点累积的事件流
+async for raw in graph.astream(initial, stream_mode="values"):
+    if 首帧 == 初始状态快照: continue      # astream 首项是输入本身，跳过
+    state = AgentState(**raw)               # 用最新状态重建
+    yield from state.events[emitted:]       # 回放本节点新增事件
+    yield 下一节点的 NODE_START             # 线性链按图序预推，保持时间线
+# 全图结束 → SUMMARY → COMPLETE；未捕获异常 → ERROR
+```
+
+> **设计要点**：节点只做两件事——调用对应子智能体（`BaseAgent.__call__` 把异常写进 `state.errors`）并把节点事件（THINKING / NODE_COMPLETE / RISK_FOUND）累积进 `state.events`；NODE_START 由 runner 按图序预推。对外 `run_contract_analysis` SSE 接口不变，前端协议零改动。
+
+> **面试追问**：子智能体报错为什么不停？答：节点内异常被 BaseAgent 捕获并写入 `state.errors` → 转 `THINKING` 警告事件，图继续走到 END；只有整个图抛未捕获异常才发 `ERROR`。原则是**尽可能输出部分可用结果**——Extractor 失败则 Reviewer 无输入，但 Reviewer 失败时法条已就绪仍可降级输出。
 
 ---
 
@@ -354,7 +358,7 @@ class SupervisorAgent:
 评估先于话术（没风险就不用生成话术）。
 ```
 
-> **面试追问**：有没有可以并行的部分？答：假设多子报告，评估不同条款可以并行（fan-out），但目前一个 Supervisor 单报告串行足够；将来量大可用 LangGraph `Send` 做条款级并行。
+> **面试追问**：有没有可以并行的部分？答：图本身是线性链，由阶段依赖决定（先有条款才能检索、有法条才能评估）。若做「多子报告 / 条款级并行审查」，可在 extract 后对每条条款 fan-out——LangGraph 原生支持 `Send` 条件分支，当前单报告场景未启用。
 
 ---
 
@@ -377,7 +381,7 @@ class SupervisorAgent:
 1. 用户拍照/上传 → Flutter 端 mlkit OCR → maskSensitive 正则脱敏（身份证/卡号/手机号）
 2. POST /api/v1/contracts → 合同落库(MySQL)，原文存档(MinIO)
 3. GET /api/v1/contracts/{id}/analysis/stream（SSE 长连接）
-4. SupervisorAgent 依次跑 4 个子智能体，边跑边推 SSE：
+4. LangGraph 编译图 astream 逐节点推进 4 个阶段，边跑边推 SSE：
    node_start → (extractor) → node_complete
    node_start → (retriever) → node_complete
    node_start → (reviewer) → node_complete + 逐条 risk_found
@@ -407,21 +411,23 @@ error          —— 出错
 
 ---
 
-# **23、如果重新设计，会不会直接用 LangGraph 的 StateGraph？（⭐⭐⭐）**
+# **23、为什么迁到真 LangGraph 的 StateGraph？实现到什么程度？（⭐⭐⭐）**
 
 ```text
-现状：Supervisor 用「for 循环 + 顺序调用」模拟了串行图，没上真正 StateGraph。
-优点：简单直接、调试容易、错误处理直观。
-局限：没有真正的条件边 / 分支 / 回退 / 并行 / Checkpoint 断点续跑。
+现状：编排层已用 LangGraph 1.x 真 StateGraph 重写（app/agent/graph.py）：
+- extract → retrieve → review → negotiate 四节点线性图，compile 后单例复用；
+- 节点包装原 4 个子智能体，子智能体/错误处理逻辑零改动，只替换编排器；
+- 执行器 astream(stream_mode="values")：跳过初始快照 → 按序推进节点 →
+  回放 state.events 累积事件 → 按线性链预推 NODE_START，对外 SSE 协议不变。
 ```
 
-- 演进方案（面试可展开）：
-  - 把 4 个子智能体改成 `StateGraph` 节点；
-  - Reviewer 之后加**条件边**：`if not risk_assessments: → END`（省掉空转的 Negotiator）；
-  - 引入 `interrupt_before` 支持 HITL 人工复核；
-  - 加 Checkpoint（SQLite/Redis）支持长任务断点续跑与审计回放。
+- 尚未启用的图能力（面试可展开）：
+  - **条件边**：reviewer 后加 `if not risk_assessments → END`，省掉空转的 negotiator；
+  - **并行**：extract 后按条款 fan-out（LangGraph `Send`）；
+  - **HITL**：`interrupt_before` 支持人工复核；
+  - **Checkpoint**：断点续跑 + 审计回放（节点事件已全量累积在 `state.events`，接持久化即可回放）。
 
-> **面试追问**：为什么当初没用 StateGraph？答：MVP 阶段链路固定串行，循环编排 30 行就能表达；图编排在需要分支/并行/中断时才真正划算（YAGNI 原则）。
+> **面试追问**：迁移的收益与代价？答：编排语义从「手写 for 循环」升级为「图定义 + 官方运行时」，状态流转、事件回放、未来的分支/并行/断点都有标准答案；代价是状态更新要遵循图 reducer 语义（事件走 events 累积通道）。属于「先跑通再换引擎」的合理演进，重写期间 SSE 接口与测试全部保持绿。
 
 ---
 
@@ -456,7 +462,7 @@ SQLModel（FastAPI 作者开源的 Pydantic+SQLAlchemy 融合 ORM）+ MySQL(异�
 | risk_assessments | list[RiskAssessment] | Reviewer | Negotiator、落库 |
 | overall_score / overall_level / summary | int/Enum/str | Reviewer | 落库、summary 事件 |
 | current_node | str | BaseAgent.__call__ | 调试/审计 |
-| errors | list[str] | BaseAgent.__call__ 异常捕获 | Supervisor 发 thinking 事件 |
+| errors | list[str] | BaseAgent.__call__ 异常捕获 | graph runner 转 THINKING 事件 |
 
 ---
 
@@ -786,28 +792,34 @@ for assessment in state.risk_assessments:
 | content | VARCHAR(4096) | 法条原文 |
 | keywords | VARCHAR(1024) | 关键词（逗号分隔，供 BM25/过滤） |
 | category | VARCHAR(128) | 风险分类（如 probation_salary） |
-| embedding | FLOAT_VECTOR(384) | 法条内容向量 |
+| embedding | FLOAT_VECTOR(768) | 法条内容向量（默认 BGE-base-zh-v1.5，维度随模型自动探测） |
 
 > **面试追问**：为什么不把每条法条当成"知识库片段"还要存 law_name/article 结构化字段？答：法律场景引用要精确到**法名+条号**，结构化字段用于展示引用、去重键（law_name_article）、以及 category 过滤。
 
 ---
 
-# **45、Embedding 用什么模型？多少维？（⭐⭐）**
+# **45、Embedding 用什么模型？多少维？怎么保证是"真语义"？（⭐⭐）**
 
 ```text
-代码注释标注：all-MiniLM-L6-v2，384 维。
-但目前 _simple_embedding 是「占位随机向量」(seed=42)！
+双 Provider（app/rag/embeddings.py，EMBEDDING_PROVIDER 切换）：
+- local（默认）：sentence-transformers 本地模型 BAAI/bge-base-zh-v1.5，768 维；
+- api：OpenAI 兼容 /embeddings 接口（如硅基流动 BGE-M3）。
+模型权重预下载到 backend/models/ 扁平目录（local_files_only 加载，不碰
+huggingface.co；未命中时自动走 hf-mirror 镜像拉取，容器内只读挂载）。
 ```
 
 ```python
-def _simple_embedding(texts):
-    """占位 embedding: 随机向量 (生产环境应使用 sentence-transformers 或 API)."""
-    import random
-    random.seed(42)
-    return [[random.uniform(-1, 1) for _ in range(_DIM)] for _ in texts]
+# BGE 系列检索约定：只给 query 加指令前缀（文档侧不加），提升召回精度
+_BGE_QUERY_INSTRUCTION_ZH = "为这个句子生成表示以用于检索相关文章："
+
+def embed_query(self, text):
+    instruction = get_settings().embedding_query_instruction   # 可配置覆盖
+    if not instruction and "bge" in self.model_name.lower():
+        instruction = _BGE_QUERY_INSTRUCTION_ZH
+    return self.embed_texts([instruction + text])[0]           # 仅查询侧生效
 ```
 
-> **面试追问（重点⚠️）**：这个占位实现会导致什么问题？答：**随机向量之间没有语义相关性**，检索结果≈随机，RAG 语义检索形同虚设。面试官挖这里时要答：① 这是 MVP 遗留 TODO；② 生产必须接真实 Embedding（如 bge-base-zh-v1.5 768 维或 OpenAI embedding），且**维度要同步改** `_DIM` 与 collection schema；③ 已入库的随机向量需要**清空重建**而不是增量插（旧向量无意义）。
+> **面试追问（重点⚠️）**：换模型/维度变了怎么办？答：Milvus 集合名 = 基名 + embedding 签名 8 位哈希（如 `labor_laws_1d4ae209`），换模型自动创建新集合、向量空间绝不混用；法条向量 encode 时统一 `normalize_embeddings=True`。追问"效果怎么证明"：90 份金标准合同实测 hit@5 达 87.8%（混合通道，RRF），`backend/eval/retrieval_eval.py` 一键复现。
 
 ---
 
@@ -816,9 +828,10 @@ def _simple_embedding(texts):
 ```python
 index_params = {
     "index_type": "IVF_FLAT",
-    "metric_type": "L2",
+    "metric_type": "COSINE",
     "params": {"nlist": 128},
 }
+# 检索侧参数：COSINE + nprobe=16（app/rag/milvus_store.py）
 ```
 
 | 索引 | 特点 | 结论 |
@@ -839,17 +852,21 @@ IVF_FLAT 已足够；如果法条库扩到万级+，再换 HNSW。
 # **47、Milvus 初始化为什么是幂等的？（⭐⭐）**
 
 ```python
-def init_milvus():
-    collection = get_milvus_collection()
-    if collection.num_entities > 0:      # 已有数据直接返回
-        return
-    # 否则全量插入 ALL_LAWS
+def init_milvus():                       # app/rag/milvus_store.py（幂等）
+    client = get_milvus_client()
+    name = ensure_milvus_collection()    # 不存在则建；语料/embedding 变化自动重建
+    if client.get_collection_stats(name)["row_count"] > 0:
+        return                           # 已有数据直接返回
+    # 否则全量向量化 ALL_LAWS 后按行式 dict 插入
 ```
 
 ```text
-幂等设计：应用重启/多副本并发启动时，只会插入一次法条，
-不会重复灌库。这依赖 num_entities 检查（而非内存标记），
-避免多进程各插一遍。
+幂等设计：应用重启/多副本并发启动时只会灌一次库，不会重复灌。
+判断链（全部基于真实查询，不依赖内存标记，多进程也安全）：
+- 集合不存在 → 按当前 embedding 维度建 schema + IVF_FLAT/COSINE 索引；
+- row_count > 0 → 直接返回；
+- 语料内容哈希 / embedding 签名变化 → 自动 drop 重建；
+- 发现无签名后缀的旧版集合（占位向量时代产物）→ 自动清理。
 ```
 
 ---
@@ -857,8 +874,9 @@ def init_milvus():
 # **48、Milvus 的隔离方案了解吗？Lumos 用哪种？（⭐⭐）**
 
 ```text
-Lumos：单一 collection（按 settings.milvus_collection 配置），通过 category/law_name
-标量字段做业务过滤 —— 单租户场景无需强隔离。
+Lumos：集合名 = settings.milvus_collection（基名）+ embedding 签名 8 位哈希，
+例如 labor_laws_1d4ae209 —— 换模型/通道自动开新集合、互不干扰；集合内通过
+category/law_name 标量字段做业务过滤。单租户场景无需 Database/Partition 级强隔离。
 ```
 
 | Milvus 隔离方案 | 说明 | 适用 |
@@ -885,7 +903,7 @@ Lumos：单一 collection（按 settings.milvus_collection 配置），通过 ca
 | IP 内积 | 越大越相似 | 归一化后等价余弦，性能更好 |
 | COSINE | 夹角余弦，越大越相似 | 语义相似度最直观 |
 
-> **面试追问**：代码里用了 L2，但如果换一个没归一化的 Embedding 会怎样？答：L2 对向量**模长敏感**，长度不同的文本向量会干扰相似度排序；生产建议：选 IP/COSINE 或统一 L2-normalize 后再入库。
+> **面试追问**：代码里用了 COSINE，为什么不用 L2/IP？答：encode 时统一 `normalize_embeddings=True`，归一化后 COSINE 与 IP 排序等价，夹角相似度对文本长度不敏感；L2 对向量模长敏感，不同长度文本会干扰排序。追问：若换模型呢？维度/向量空间由 embedding 签名自动隔离，新集合按新维度重建，无需手工迁移数据。
 
 ---
 
@@ -933,7 +951,7 @@ category 预标注的价值：法条级就打好"坑点标签"，检索时可直
 ```text
 排查顺序（RAG 标准流程）：
 1. 看召回：相关法条有没有被召回？（Recall 优先）
-   → 没有：query 构造问题 / 库里没有 / embedding 是随机向量(本项目的大坑)
+   → 没有：query 构造问题 / 库里没有 / 检索通道异常（Milvus 不可用、embedding 未加载）
 2. 看排序：召回的里面相关的是否排前面？
    → 不相关排前：检索 score 无效 / 需要 rerank
 3. 看引用：LLM 是否真用了召回的法条？
@@ -1051,11 +1069,11 @@ await mcp.call("law_search",
 {"results": [
     {"law_name": "《劳动合同法》", "article": "第二十三条",
      "content": "……", "keywords": "…", "category": "…",
-     "similarity": 0.87}  # 注意：代码里把检索距离当 similarity 用
+     "similarity": 0.87}  # COSINE 通道：出口统一 similarity = 1 - distance
 ]}
 ```
 
-> **面试追问**：索引度量是 L2（越小越相似），但字段叫 similarity 且正序排序取大的？答：⚠️ 这是一个潜在 bug/语义陷阱——L2 距离应取**最小**，如果检索侧直接拿原始距离当"相似度"且取最大，排序语义是反的。面试主动点破这个细节非常加分：要么检索时转成 cosine/内积语义的相似度，要么对 L2 距离取负/倒数再排序。
+> **面试追问**：为什么要把 distance 换算成 similarity 再返回？答：Milvus COSINE 的 distance = 1-cos（**越小越相似**），通道出口统一转 `similarity = 1 - distance` 后语义才一致（越大越相关），向量入库/查询均归一化。踩坑经验：若直接把原始距离当"相似度"且正序取大，排序会反——换算口径必须写死在通道出口统一打标。
 
 ---
 
@@ -1160,7 +1178,7 @@ class BaseAgent(ABC):
         return state
 ```
 
-> **面试追问**：`__call__` 为什么把异常吞进 errors 而不是抛出？答：见 Q18 —— 子链路失败不应让整个流程崩溃，errors 列表让 Supervisor 感知并继续产出部分结果；错误集中最后落库审计。
+> **面试追问**：`__call__` 为什么把异常吞进 errors 而不是抛出？答：见 Q18 —— 子链路失败不应让整个流程崩溃，errors 列表让图编排层（runner）感知并继续产出部分结果；错误集中最后落库审计。
 
 ---
 
@@ -1690,7 +1708,7 @@ Extractor 1 次 + Retriever ~20 次小调用 + Reviewer 1 次 + Negotiator ~N �
 | 风险 | 兜底手段 |
 | --- | --- |
 | LLM 供应商故障 | 多模型 base_url 可切、错误快速失败+提示重试 |
-| Embedding 是随机占位 | ✅ 必须替换为真实 Embedding 并重建库（最大技术债） |
+| Embedding 未就绪 / Milvus 不可用 | 启动自检 + 向量通道自动关闭仅留 BM25；真实 BGE 模型本地持久化 |
 | 流式连接半路断 | 报告落库幂等 + 前端查库兜底 |
 | 恶意刷成本 | rate_limit + 用户配额 |
 | 幻觉引发投诉 | 引用校验 + 审计日志可回放 |
@@ -1702,11 +1720,11 @@ Extractor 1 次 + Retriever ~20 次小调用 + Reviewer 1 次 + Negotiator ~N �
 
 ```text
 诚实 + 有方案地回答（面试官非常看重）：
-1. 占位随机 Embedding —— 检索形同虚设，第一优先级替换真实模型并重建向量；
-2. Supervisor 手写循环 → 迁 LangGraph StateGraph —— 获得条件边/并行/Checkpoint/HITL；
+1. 法条语料仅 29 条/5 部（MVP 高频坑点）—— 扩展完整法条库 + 司法解释/判例 + 版本生效期管理；
+2. LangGraph 已就位但未启用条件边/并行/Checkpoint —— 节点事件已全量累积，落地路径清晰；
 3. Prompt 双写（模型+规则口径）→ 抽共享配置；
 4. 引用无程序化校验 → 加 ref_id 映射 + 越界剔除；
-5. 评测集缺失 → 沉淀黄金合同集 + 指标闭环（Q89/Q90）。
+5. 评测集仅 90 份单标签金标准 → 补人工标注综合区（多标签）+ 指标闭环（Q89/Q90）。
 ```
 
 ---
@@ -1728,9 +1746,9 @@ Extractor 1 次 + Retriever ~20 次小调用 + Reviewer 1 次 + Negotiator ~N �
 # **附：面试官最可能追问的 3 个"坑点"（提前自检）**
 
 ```text
-1. Embedding 是随机占位向量 —— 主动承认并讲清替换/重建方案（Q45）
-2. L2 距离被当 similarity 排序 —— 主动点破度量与语义的坑（Q58）
-3. 说"用了 LangGraph"但代码是 for 循环编排 —— 诚实说明设计取舍与迁移计划（Q23）
+1. RAG 是"真检索"吗 —— 真实 BGE embedding（768 维双 Provider）+ 90 金标准 hit@k/MRR 评测可复现（Q45）
+2. 向量度量与归一化 —— COSINE + 入库归一化；换模型按 embedding 签名自动隔离重建（Q46/Q48/Q49）
+3. 说"用了 LangGraph"就要讲清实现 —— 真 StateGraph：节点包装/编译/astream 事件回放（Q18/Q23）
 ```
 
 > 建议：以上三个问题主动暴露比被面试官挖出来要好 —— 展示"知道自己系统的缺陷 + 有修复路径"是高级工程师信号。

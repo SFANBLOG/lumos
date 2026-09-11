@@ -59,20 +59,21 @@
 
 ## 三、界面预览
 
-| 平台 | 功能截图 |
-|:---|:---|
-| Web 工作台 | 分析看板、合同列表、风险概览统计 |
-| Web 合同分析 | 极光动画等待 → 风险卡片逐条呈现 → 完整报告 |
-| Web 智能咨询 | 多轮对话，法条引用标注，追问建议 |
-| Web MCP 工具箱 | MCP 工具列表与调用 |
+| 工作台 | 合同分析结果 | 智能咨询 |
+|:---:|:---:|:---:|
+| ![工作台](front/shots/dashboard.png) | ![合同分析](front/shots/analysis-result.png) | ![智能咨询](front/shots/consult-3-answering.png) |
 
-> 完整截图见 `front/shots/` 目录。
+| 文件导入分析 | MCP 工具箱 | 报告详情 |
+|:---:|:---:|:---:|
+| ![文件分析](front/shots/file-analysis-result.png) | ![MCP 工具](front/shots/mcp-1-law-search.png) | ![报告抽屉](front/shots/report-drawer.png) |
+
+> 完整截图（含登录、咨询全流程、生产环境演练等 23 张）见 `front/shots/` 目录。
 
 ---
 
 ## 四、技术栈
 
-**客户端（Flutter）**
+**客户端（Flutter，已归档至 `archive/client/`）**
 
 | 技术 | 说明 |
 |:---|:---|
@@ -95,13 +96,13 @@
 
 | 技术 | 说明 |
 |:---|:---|
-| FastAPI (Python 3.12+) | 极速异步框架 + 自动 Swagger 文档 |
+| FastAPI (Python 3.11+) | 极速异步框架 + 自动 Swagger 文档 |
 | LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → negotiate，共享 Pydantic `AgentState` |
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
 | 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
 | Milvus | 向量数据库（COSINE，动态维度）；不可用时向量通道自动关闭，仅保留 BM25 关键词检索 |
-| BM25 (jieba) | 法条语料全文关键词通道，与向量通道经 **RRF** 融合 |
+| BM25 (jieba) | 法条语料全文关键词通道（零分未命中文档不进候选），与向量通道经 **RRF** 融合；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折） |
 | MinIO | 对象存储，合同文件与扫描件上传 |
 
 ---
@@ -110,54 +111,88 @@
 
 系统采用**前后端分离**的现代 Agent 架构，结合移动端原生性能、Web 端便捷性与后端强大的 AI 编排能力。
 
-```
-┌───────────────────────────────────────────────────────────┐
-│              📱 Lumos Client (Flutter APP)                │
-│              💻 Lumos Web (Vue 3 + Vite)                  │
-│                                                           │
-│   [UI 表现层]  扫描合同 → 播放极光动画 → 展示风险卡片       │
-│   [通信层]     Dio / Axios Streaming (SSE 接收分析过程)     │
-└────────────────────────┬──────────────────────────────────┘
-                         │  📤 脱敏后的合同纯文本
-                         ▼
-┌───────────────────────────────────────────────────────────┐
-│              🧠 Lumos Server (Python AI Agent)            │
-│                                                           │
-│   [API 网关]  FastAPI Endpoints                           │
-│   [认证授权]  JWT + API Key                               │
-│   [Agent 引擎] LangGraph StateGraph（4 节点线性链）        │
-│     ├── 1. Extractor   — 结构化抽取：乱序文本 → 标准条款   │
-│     ├── 2. Retriever   — 混合检索 (RAG)：关键条款 → 法条   │
-│     ├── 3. Reviewer    — 风险审查：多维度打分 + 法律依据    │
-│     └── 4. Negotiator  — 谈判策略：为每条风险生成话术      │
-│   [数据持久化] SQLModel + MySQL 8                          │
-│   [对象存储]   MinIO (PDF/Word/图片上传)                   │
-│   [检索链路]   Milvus→ChromaDB (向量, 真实 embedding)      │
-│                + BM25/jieba (关键词) → RRF 融合            │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph L1["① 客户端层"]
+        direction LR
+        W["Vue 3 Web 端<br/>Vite · Pinia · Element Plus · Axios（SSE）"]
+        M["Flutter 移动端（已归档）<br/>Riverpod · go_router · Dio（SSE）"]
+    end
+
+    subgraph L2["② API 网关层 · FastAPI"]
+        direction LR
+        A1["认证鉴权<br/>JWT + API-Key"]
+        A2["中间件<br/>限流 · 日志 · 指标 · 全局异常"]
+        A3["路由<br/>REST + SSE · 19 端点"]
+    end
+
+    subgraph L3["③ Agent 编排层 · LangGraph StateGraph"]
+        direction LR
+        N1["1 ExtractorAgent<br/>抽取 · OCR 纠错 · 条款结构化"]
+        N2["2 RetrieverAgent<br/>混合检索召回法条"]
+        N3["3 ReviewerAgent<br/>风险评级 · 评分 · 法条依据"]
+        N4["4 NegotiatorAgent<br/>谈判话术生成"]
+        N5["ConsultantAgent<br/>独立智能咨询"]
+        N1 --> N2 --> N3 --> N4
+    end
+
+    subgraph L4["④ 检索链路 · Hybrid RAG"]
+        direction LR
+        E1["Embedding<br/>bge-base-zh-v1.5 · 768 维"]
+        V1["Milvus 向量通道<br/>COSINE · 签名隔离集合"]
+        B1["BM25 关键词通道<br/>jieba + 法律领域词典"]
+        F1["RRF 融合<br/>k = 60"]
+        E1 --> V1 --> F1
+        B1 --> F1
+    end
+
+    subgraph L5["⑤ 存储与协议"]
+        direction LR
+        S1["MySQL 8<br/>SQLModel · aiomysql"]
+        S2["MinIO<br/>合同原件"]
+        S3["MCP Server<br/>JSON-RPC 2.0 · 4 工具"]
+    end
+
+    L1 --> L2 --> L3
+    N2 --> L4
+    F1 --> N3
+    L3 --> L5
 ```
 
 ### 5.1 一次合同分析的完整链路
 
-```
-用户提交合同文本
- │
- ├─ [Extractor 节点] 文本清洗（OCR 纠错/段落规范化）
- │   └─ 调用 LLM 将合同拆分为结构化条款（含风险预分类）
- │   └─ LLM 失败时降级为段落分割
- │
- ├─ [Retriever 节点] 对每条已提取条款，通过 law_search 工具
- │   └─ 混合检索：Milvus/Chroma 向量通道 + BM25 关键词通道 → RRF 融合
- │   └─ 去重后排序，填充 legal_references
- │
- ├─ [Reviewer 节点] 构建条款+法条上下文
- │   └─ 调用 LLM 逐项评估风险（评分/等级/法律依据/谈判话术）
- │   └─ LLM 失败时降级为规则审查
- │
- ├─ [Negotiator 节点] 对缺失 negotiation_tip 的条目
- │   └─ 通过 negotiation 工具填充谈判话术
- │
- └─ [格式化输出] 节点事件沿 SSE 事件流回放 → 前端风险卡片展示
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户 / 前端
+    participant API as FastAPI 网关
+    participant G as LangGraph 工作流
+    participant R as 混合检索 RAG
+    participant L as LLM
+
+    U->>API: POST /api/v1/contracts 提交合同文本
+    API->>G: 启动 StateGraph（共享 Pydantic AgentState）
+    API-->>U: 返回 contract_id
+
+    U->>API: GET /contracts/id/stream（SSE 订阅）
+    G-->>U: NODE_START extractor
+    G->>L: 条款结构化抽取（失败降级为段落分割）
+    L-->>G: 结构化条款 + 风险预分类
+    G-->>U: NODE_COMPLETE extractor
+
+    G-->>U: NODE_START retriever
+    G->>R: search_laws 混合召回（向量 + BM25 → RRF）
+    R-->>G: Top-K 法条（可溯源到具体条文）
+    G-->>U: NODE_COMPLETE retriever
+
+    G-->>U: NODE_START reviewer
+    G->>L: 逐条风险评级 + 100 分制评分（失败降级规则引擎）
+    L-->>G: 风险条目 + 法条依据 + 话术
+    G-->>U: RISK_FOUND 逐条推送
+
+    G-->>U: NODE_START negotiator
+    G->>L: 为缺失项补全谈判话术
+    G-->>U: SUMMARY + COMPLETE
 ```
 
 各节点通过 `graph.astream` 推进：节点内产生的 `THINKING / NODE_COMPLETE / RISK_FOUND` 事件按序累积进 `state.events`，runner 增量回放，`NODE_START` 按图顺序预推——保持「节点开始 → 思考 → 完成」的原始时间线语义。任一节点异常不中断全图：子智能体捕获错误写入 `state.errors` 并转为 `THINKING` 警告事件继续执行。
@@ -219,7 +254,7 @@ StateGraph(AgentState)
 
 | 工具 | 说明 | 数据来源 |
 |---|---|---|
-| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：向量（Milvus→Chroma）+ BM25 → RRF |
+| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：向量（Milvus）+ BM25 → RRF |
 | `risk_assess` | 对结构化条款进行风险评分与法律依据匹配 | ReviewerAgent 内部逻辑 |
 | `clause_analyze` | 对单一条款进行深度分析 | LLM + 法条上下文 |
 | `negotiation` | 为风险条款生成可执行谈判话术 | LLM 生成 |
@@ -257,7 +292,7 @@ StateGraph(AgentState)
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/)
 - [Node.js](https://nodejs.org/) 18+（Web 端开发）
 - [Flutter](https://flutter.dev/docs/get-started/install) 3.x+（移动端开发，可选）
-- [Python](https://www.python.org/) 3.12+（服务端开发，可选）
+- [Python](https://www.python.org/) 3.11+（服务端开发，可选）
 
 ### 7.1 方式一：Docker Compose 一键部署（推荐）
 
@@ -299,24 +334,26 @@ docker compose logs -f backend
 
 ```bash
 cd backend
-pip install -e ".[dev]"     # 含 embedding extra（sentence-transformers 等）
+pip install -e ".[dev]"     # 主依赖已含 sentence-transformers / pymilvus / rank-bm25 / jieba
 cp .env.example .env
-# 编辑 .env 填入 AI API Key 等配置（默认 embedding_provider=local，首次检索会下载模型）
+# 编辑 .env 填入 AI API Key 等配置
 uvicorn app.main:app --reload
 ```
+
+> **本地 embedding 模型**：默认 `EMBEDDING_PROVIDER=local`，权重目录约定为扁平命名 `backend/models/bge-base-zh-v1.5/`（约 400MB，已在 `.gitignore` 中排除）。目录存在即直接加载（跳过 HF 探测）；缺失时按 `HF_ENDPOINT` 镜像自动下载。模型名写 `bge-base-zh-v1.5` 或 `models/bge-base-zh-v1.5` 均可被正确解析。
 
 **Web 前端：**
 
 ```bash
-cd web
+cd front
 npm install
 npm run dev
 ```
 
-**Flutter 客户端：**
+**Flutter 客户端（已归档）：**
 
 ```bash
-cd client
+cd archive/client   # 遗留移动端已归档（原 client/），代码仅供参考
 flutter pub get
 flutter run
 ```
@@ -337,7 +374,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **27 条 pytest 用例**（默认跑 25 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、Milvus 失败降级 Chroma、LangGraph 状态流转与错误恢复（见 `backend/tests/`）；
+- 当前 **27 条 pytest 用例**（默认跑 25 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（见 `backend/tests/`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -347,15 +384,15 @@ cd backend
 python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_eval_latest.{md,json}
 ```
 
-评测以 `data/contracts/` 下 **90 份单分类金标准合同**（高危/警惕/关注三区 × 9 类风险 × 10 份）为样本：从合同文本抽取风险句作为查询，分别跑 **向量 / BM25 / 混合** 三个通道，统计 `hit@1/3/5` 与 `MRR@5`。**2026-09-08 实测**（真实 embedding，29 条法条文语料）：
+评测以 `data/contracts/` 下 **90 份单分类金标准合同**（高危/警惕/关注三区 × 9 类风险 × 10 份）为样本：从合同文本抽取风险句作为查询，分别跑 **向量 / BM25 / 混合** 三个通道，统计 `hit@1/3/5` 与 `MRR@5`。**2026-09-09 实测**（本地 BAAI/bge-base-zh-v1.5，768 维，29 条法条文语料）：
 
 | 通道 | hit@1 | hit@3 | hit@5 | MRR@5 |
 | :--- | :--- | :--- | :--- | :--- |
-| 向量（真实 embedding） | 0.533 | 0.667 | 0.856 | 0.628 |
+| 向量（真实 embedding） | 0.489 | 0.656 | 0.833 | 0.613 |
 | BM25（jieba 领域词典） | 0.322 | 0.433 | 0.700 | 0.437 |
-| 混合（RRF 融合） | 0.489 | 0.611 | **0.878** | 0.597 |
+| 混合（RRF 融合） | 0.389 | 0.789 | **0.878** | 0.585 |
 
-如实解读：RRF 融合将 hit@5 提升至 **87.8%**（召回广度收益）；小语料下 BM25 噪音会拉低榜首精度，hit@1/MRR 略低于纯向量——扩大语料 / 调优 `rrf_k` 是后续方向（重新运行本命令即可复现最新数字）。
+如实解读：榜首精度（hit@1 / MRR@5）纯向量最好、融合次之、BM25 最后——29 条小语料下 BM25 噪音会拉低融合榜首；但 **RRF 融合的广度优势在 hit@3 / hit@5 上显著**：0.789 / **0.878**，均超过纯向量（0.656 / 0.833）。扩大语料 / 调优 `rrf_k` 是后续方向（重新运行本命令即可复现最新数字）。
 
 ### 8.3 量化口径边界
 
@@ -377,6 +414,7 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | 应用 | `APP_ENV` | `development` | 运行环境 |
 | | `LOG_LEVEL` | `DEBUG` | 日志级别 |
 | 数据库 | `DATABASE_URL` | `mysql+aiomysql://lumos:lumos@localhost:3306/lumos` | MySQL 连接串（Docker 部署时宿主端口为 3308） |
+| SQL 回显 | `DATABASE_ECHO` | `false` | 是否在日志回显执行 SQL（调试用；默认关闭避免刷屏） |
 | LLM | `LLM_API_KEY` | （必填） | AI 模型 API Key |
 | | `LLM_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI 兼容接口地址 |
 | | `LLM_MODEL_NAME` | `deepseek-chat` | 模型名称 |
@@ -385,8 +423,12 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `EMBEDDING_API_KEY` | （空） | `api` 模式密钥 |
 | | `EMBEDDING_BASE_URL` | `https://api.deepseek.com/v1` | `api` 模式接口地址 |
 | | `EMBEDDING_DIM` | （空） | 手动指定向量维度；留空则由模型自动探测 |
+| | `EMBEDDING_QUERY_INSTRUCTION` | （空，按模型自动） | 检索 query 前缀指令；BGE 系列自动加中文指令、文档侧不加，非 BGE 模型不追加 |
+| | `HF_ENDPOINT` | `https://hf-mirror.com` | 本地模型权重缺失时的下载镜像（huggingface.co 受限时使用） |
 | 混合检索 | `HYBRID_TOP_K_RATIO` | `2` | 融合前各通道候选数 = top_k × 该值 |
 | | `RRF_K` | `60` | RRF 融合参数：score = Σ 1/(k + rank) |
+| | `HYBRID_VECTOR_WEIGHT` | `0.65` | 相关度分数中向量通道权重（BM25 权重 = 1 − 该值） |
+| | `HYBRID_SINGLE_CHANNEL_FACTOR` | `0.85` | 仅单通道命中时的相关度折扣（0~1） |
 | 视觉 OCR | `LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL` / `LLM_VISION_MODEL_NAME` | qwen-vl / DashScope | 图片文字抽取（未配置时回退 Tesseract） |
 | | `IMAGE_OCR_STRATEGY` | `auto` | `auto` \| `llm` \| `tesseract` |
 | 安全 | `API_SECRET_KEY` | （空，置空关闭鉴权） | 业务鉴权密钥 |
@@ -417,7 +459,7 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `GET` | `/api/v1/contracts/{id}` | 查询单个合同记录 |
 | MCP 工具 | `GET` | `/api/v1/mcp/tools` | 列出 MCP 工具（含 schema） |
 | | `POST` | `/api/v1/mcp/tools/call` | 调用 MCP 工具 |
-| 智能导入 | `POST` | `/api/v1/ingest/file` | 上传文件抽取文本（10 种格式 + OCR） |
+| 智能导入 | `POST` | `/api/v1/ingest/file` | 上传文件抽取文本（16 种格式 + OCR） |
 | | `POST` | `/api/v1/ingest/url` | 抓取网页抽取正文 |
 | 智能咨询 | `POST` | `/api/v1/consult/ask` | 发起智能咨询（SSE 流式） |
 | | `GET` | `/api/v1/consult/sessions` | 会话列表 |
@@ -443,7 +485,7 @@ lumos/
 │       ├── features/                  # 业务功能模块（analysis/home/main/mcp/report/scanner/splash）
 │       └── shared/                    # 公共组件
 │
-├── web/                               # Vue 3 Web 前端
+├── front/                             # Vue 3 Web 前端
 │   ├── src/
 │   │   ├── api/                       # API 接口封装（auth/client/contract/consult/ingest）
 │   │   ├── layouts/                   # 布局组件
@@ -453,7 +495,8 @@ lumos/
 │   │   ├── views/                     # 页面（Dashboard/Analysis/Reports/Consult/MCP/Login/Register）
 │   │   ├── App.vue
 │   │   └── main.ts
-│   └── Dockerfile + nginx.conf
+│   ├── shots/                         # Web 端功能截图（README §三 引用）
+│   └── Dockerfile + nginx.conf        # Nginx 托管 + SSE 长连接代理（关闭缓冲/放宽超时）
 │
 ├── backend/                           # Python FastAPI 服务端
 │   ├── app/
@@ -463,10 +506,10 @@ lumos/
 │   │   │   ├── base.py                # 子智能体抽象基类 BaseAgent
 │   │   │   ├── llm.py                 # LLM 客户端工厂（ChatOpenAI / Vision）
 │   │   │   └── sub_agents/            # Extractor/Retriever/Reviewer/Negotiator/Consultant
-│   │   ├── rag/                       # 混合检索（真实 embedding + Milvus/Chroma + BM25 + RRF）
+│   │   ├── rag/                       # 混合检索（真实 embedding + Milvus + BM25 + RRF）
 │   │   │   ├── embeddings.py          # 双 Provider embedding（local / API），签名隔离
 │   │   │   ├── milvus_store.py        # Milvus 集合管理 + 检索（COSINE/动态维度）
-│   │   │   ├── vector_store.py        # 混合检索入口 search_laws + ChromaDB 降级
+│   │   │   ├── vector_store.py        # 混合检索入口 search_laws（向量 + BM25 → RRF）
 │   │   │   ├── bm25_index.py          # BM25 全文检索（jieba 分词 + 法律领域词典）
 │   │   │   ├── hybrid.py              # RRF 融合（Reciprocal Rank Fusion）
 │   │   │   └── law_corpus.py          # 劳动法规条文语料（内容哈希）
@@ -480,16 +523,33 @@ lumos/
 │   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
 │   │   └── retrieval_eval.py
 │   ├── tests/                         # 27 条 pytest 用例（25 默认 + 2 e2e marker）
+│   ├── models/                        # 本地 embedding 权重（bge-base-zh-v1.5，已 gitignore）
+│   ├── logs/                          # 运行日志（每日轮转/保留 30 天，已 gitignore）
 │   ├── pyproject.toml
 │   └── .env.example
 │
 ├── docs/                              # 项目文档
-│   └── technical-design.md            # 技术设计方案（含实现现状附录）
+│   └── technical-design.md            # 技术设计方案（早期基线 + 实现现状对照附录 A/B）
 │
-├── data/contracts/                    # 测试语料（100 份中文合同，高危/警惕/关注/综合分区）
+├── data/contracts/                    # 测试语料（100 份中文合同：高危/警惕/关注/综合 4 区）
 │
-└── public/                            # 静态资源
+├── CHANGELOG.md                       # 更新日志
+├── CONTRIBUTING.md                    # 贡献指南
+├── SECURITY.md                        # 安全政策
+├── CODE_OF_CONDUCT.md                 # 行为准则
+└── LICENSE                            # Apache-2.0
 ```
+
+**文档导航**
+
+| 文档 | 内容 |
+|:---|:---|
+| `README.md`（本文） | 项目总览、系统架构、快速开始、测试评测、API、环境变量 |
+| `docs/technical-design.md` | 技术设计方案（早期设计基线 + 实现现状对照附录 A/B） |
+| `backend/README.md` | 服务端模块说明、检索链路、测试与评测命令 |
+| `front/README.md` | Web 前端结构、开发代理与构建部署 |
+| `CHANGELOG.md` | 版本更新日志（Keep a Changelog 格式） |
+| `CONTRIBUTING.md` / `SECURITY.md` / `CODE_OF_CONDUCT.md` | 贡献指南 / 安全政策 / 行为准则 |
 
 ---
 

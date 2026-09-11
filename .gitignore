@@ -13,12 +13,26 @@ Thumbs.db
 desktop.ini
 
 # ---- IDE ----
-.idea/
 .vscode/
-*.iml
 *.swp
 *.swo
 *~
+# JetBrains IDE: 共享基础项目配置，忽略个人工作区文件
+.idea/*
+!.idea/.gitignore
+!.idea/lumos.iml
+!.idea/modules.xml
+!.idea/misc.xml
+!.idea/vcs.xml
+!.idea/inspectionProfiles/
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/workspace.xml
+.idea/shelf/
+.idea/httpRequests/
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/dictionaries/
+.idea/jsLibraryMappings.xml
 
 # ---- Python Backend ----
 __pycache__/

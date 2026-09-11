@@ -28,6 +28,7 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { apiErrorMessage } from '@/api/client'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -45,14 +46,16 @@ const rules = {
 }
 
 const handleLogin = async () => {
-  await formRef.value.validate()
+  // 校验失败不提交（validate 在规则不通过时 reject）
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   loading.value = true
   try {
     await authStore.login(form.username, form.password)
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e: any) {
-    ElMessage.error(e.response?.data?.detail || '登录失败')
+    ElMessage.error(apiErrorMessage(e, '登录失败'))
   } finally {
     loading.value = false
   }

@@ -5,7 +5,10 @@
 > 状态：架构调整 (Flutter 客户端 + Python AI 服务端)
 > 设计原则：**端侧顺滑体验、强悍的 AI Agent 大脑、数据隐私优先**
 
-> ℹ️ 说明：本文档为项目早期架构设计基线，部分技术选型与目录结构在落地时有所调整。当前实现请以仓库代码及各模块 README（`client/`、`web/`、`backend/`）为准。
+> ℹ️ 说明：本文档第 1–6 章为**项目早期架构设计基线**，部分技术选型与目录结构在落地时有所调整。
+> 落地后的实际实现请以**附录 A（v0.6.0）**、**附录 B（v0.7.0）**及仓库代码为准；
+> 各模块说明见 `backend/README.md`、`front/README.md`，归档客户端见 `archive/client/`。
+> 二者冲突时，以附录与代码为准。
 
 ---
 
@@ -33,7 +36,7 @@
 ### 2.2 服务端 (Server-Side) - 智能大脑篇
 | 层 | 库/方案 | 作用与优势 |
 |--------|--------|------------|
-| **基础框架** | **FastAPI (Python 3.12)**| 速度极快，自带 Swagger 文档，与 Pydantic 完美契合。 |
+| **基础框架** | **FastAPI (Python 3.11+)**| 速度极快，自带 Swagger 文档，与 Pydantic 完美契合。 |
 | **AI 编排** | **LangGraph / PydanticAI** | 支持构建循环节点（Cyclic Graphs），让模型"懂思考、会改错"。 |
 | **模型对接** | **LangChain / OpenAI SDK** | 无缝支持 DeepSeek、Claude、通义千问等兼容性接口。 |
 | **文档进阶** | **LlamaIndex** | 用于复杂 PDF/Word 版式的提取与知识图谱构建。 |
@@ -145,7 +148,7 @@ lumos/
 | LangGraph / PydanticAI 二选一 | **LangGraph 1.x 真 StateGraph** | `app/agent/graph.py`：extract → retrieve → review → negotiate 四节点线性链，节点共享 Pydantic `AgentState`（含 `events` 事件通道），`graph.astream` 增量回放事件；节点错误转 `THINKING` 警告并继续，全图失败才发 `ERROR` |
 | 自研编排器 | 已废弃 | 早期 `supervisor.py` 手动 for 循环编排已删除，全部迁移至 LangGraph |
 | SQLModel（SQLite/PG） | **SQLModel + aiomysql，MySQL 8** | Docker Compose 编排，宿主端口 3308 |
-| 纯向量语义检索 | **向量 + BM25 混合检索（RRF 融合）** | `app/rag/`：向量通道（Milvus → 不可用降级 ChromaDB）+ BM25 通道（jieba 分词 + 法律领域词典）→ `hybrid.py` RRF（k=60）融合，任一通道失败自动降级单通道 |
+| 纯向量语义检索 | **向量 + BM25 混合检索（RRF 融合）** | `app/rag/`：向量通道（Milvus，不可用时直接关闭、仅剩 BM25）+ BM25 通道（jieba 分词 + 法律领域词典，零分未命中文档不进候选）→ `hybrid.py` RRF（k=60）融合排序；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折），任一通道失败自动降级单通道 |
 | 向量库索引 | 未定型 | 现为：语料内容哈希 + embedding 签名双重校验，变化即自动重建；Milvus 集合名带签名后缀隔离；向量维度由模型自动探测，度量 COSINE |
 | 文档解析（LlamaIndex） | 未采用 | 实际为轻量自有解析栈：pypdf / python-docx / openpyxl / python-pptx / RTF·HTML 纯标准库，支持 16 种扩展名 |
 | OCR | 未定型 | 多模态视觉 LLM（通义千问 VL）+ Tesseract 本地兜底，`auto/llm/tesseract` 三级策略 |
@@ -167,7 +170,7 @@ backend/
 │   ├── rag/                 # 混合检索
 │   │   ├── embeddings.py    # 双 Provider 真实 embedding
 │   │   ├── milvus_store.py  # Milvus（COSINE/动态维度/签名隔离）
-│   │   ├── vector_store.py  # search_laws 混合入口 + Chroma 降级
+│   │   ├── vector_store.py  # search_laws 混合入口（向量 + BM25 → RRF）
 │   │   ├── bm25_index.py    # BM25（jieba + 领域词典）
 │   │   ├── hybrid.py        # RRF 融合
 │   │   └── law_corpus.py    # 法条语料 + 哈希
@@ -176,10 +179,54 @@ backend/
 └── tests/                   # pytest（API 冒烟 + 检索 + 工作流 + e2e marker）
 ```
 
-其余前端 `web/`、`client/`、部署 `docker-compose.yml` 与基线一致。
+其余前端 `front/`、归档 `archive/client/`、部署 `docker-compose.yml` 与基线一致。
 
 ### A.3 测试与效果评测
 
-- **单元/冒烟测试**：25 条 pytest 用例（API 冒烟、BM25/领域词典、RRF 融合、Milvus 失败降级、LangGraph 状态流转与错误恢复）；`pytest --cov=app` 输出行覆盖率（RAG 核心模块 70%+，Milvus/Chroma 依赖真实服务的分支由 e2e 覆盖）；`e2e` marker 需 `LUMOS_E2E=1` 触发。
+- **单元/冒烟测试**：27 条 pytest 用例（默认跑 25：API 冒烟、BM25/领域词典、RRF 融合、Milvus 失败降级、LangGraph 状态流转与错误恢复；另 2 条 e2e 需 `LUMOS_E2E=1`）；`pytest --cov=app` 输出行覆盖率（RAG 核心模块 70%+，Milvus 依赖真实服务的分支由 e2e 覆盖）。
 - **离线检索评测**：以 `data/contracts/` 90 份单分类金标准（高危/警惕/关注三区 × 9 类 × 10 份）抽取风险句为查询，分向量 / BM25 / 混合三通道统计 `hit@1/3/5` 与 `MRR@5`，输出 `backend/eval/output/retrieval_eval_latest.{md,json}`。
 - **量化口径边界**：`backend/app` 行数、语料份数、用例条数均为**开发规模指标**；检出率 / `hit@k` / `MRR` 等**效果指标**一律以评测脚本输出为准（见根 README §八），二者不可混用表述。
+
+---
+
+## 附录 B：实现现状对照（v0.7.0 · 2026-09-10）
+
+> 本附录记录相对附录 A（v0.6.0）的增量落地情况，聚焦**工程健壮性、可运维性与运行环境**。
+
+### B.1 增量变更
+
+| 主题 | 变更前 | 现状（v0.7.0） | 涉及文件 |
+|---|---|---|---|
+| Milvus 接入方式 | ORM-style `Collection.*`（`insert` / `flush` / `num_entities` / `search`），触发 `PyMilvusDeprecationWarning` | **`MilvusClient` 客户端 API**：`create_schema` → `prepare_index_params` → `create_collection` → `insert`（行式 dict）→ `search` / `query` / `get_collection_stats`，兼容 PyMilvus 3.1+ | `app/rag/milvus_store.py` |
+| 日志落盘 | 仅 `APP_ENV=production` 写文件，且路径相对 CWD | **开发/生产均落盘** `backend/logs/lumos_<日期>.log`：每日零点轮转、保留 30 天、gz 压缩、UTF-8、`enqueue=True`（退出时 atexit 刷盘）、路径以 `BASE_DIR` 锚定不依赖 CWD | `app/core/logging.py` |
+| SQL 回显 | `echo=settings.is_development`（开发环境必然回显，控制台被 `SELECT` 刷屏） | 新增配置 **`DATABASE_ECHO`（默认 false）**；并在日志初始化时把标准库 `sqlalchemy` / `sqlalchemy.engine` / `pool` / `dialects` 收敛至 **WARNING**，显式开启回显时才放开到 INFO | `app/core/config.py`、`app/core/database.py`、`app/core/logging.py` |
+| Python 版本 | 声明 3.12（与实际运行时不符，IDE 报 `from __future__ import annotations` 冗余） | 对齐 **3.11**：`requires-python` / ruff `target-version` / mypy `python_version` 三处统一 | `pyproject.toml` |
+| embedding 路径解析 | 直接把配置值交给 `SentenceTransformer`，非 `backend/` CWD 下解析失败，且触发对 `modules.json` / `adapter_config.json` 的 HF HEAD 探测（国内超时 `WinError 10060`） | 新增 `_resolve_local_model()`：取 basename 到 `backend/models/` 查找，命中即强制 `local_files_only=True`，**完全跳过 HF 探测**；未命中才走 `HF_ENDPOINT` 镜像下载 | `app/rag/embeddings.py` |
+| 构建/版本控制 | 构建上下文包含运行日志；模型权重、日志未完全排除 | `.dockerignore` 排除 `logs/`；`.gitignore` 覆盖 `backend/models/`、`backend/logs/` | `.dockerignore`、`.gitignore` |
+
+### B.2 目录增量
+
+```
+backend/
+├── app/core/logging.py     # loguru 控制台 + 文件双 sink；收敛 sqlalchemy 标准库日志器
+├── logs/                   # 运行日志 (每日轮转, gitignore)
+├── models/bge-base-zh-v1.5/# 本地 embedding 权重 (扁平命名, gitignore)
+└── pyproject.toml          # requires-python >=3.11
+```
+
+### B.3 约定（新增，务必遵守）
+
+1. **模型目录约定**：本地 embedding 权重统一为**扁平命名** `backend/models/<model-dir>/`，不再使用 `models/<org>/<model-dir>/` 或 HF hub-cache 式 `snapshots/` 结构；配置里写 `bge-base-zh-v1.5`、`models/bge-base-zh-v1.5`、`BAAI/bge-base-zh-v1.5` 均可被解析到同一目录。
+2. **日志约定**：应用日志走 loguru；第三方库（SQLAlchemy 等）走标准库 logging，需在 `setup_logging()` 内统一收敛级别，避免绕过 loguru 直打控制台。
+3. **CWD 无关**：所有运行时路径（日志目录、模型目录）必须以 `BASE_DIR`（= `backend/`）锚定，保证从仓库根或 `backend/` 启动行为一致。
+4. **调试 SQL**：仅在需要时置 `DATABASE_ECHO=true`，不要为调试长期打开（会污染日志文件并拖慢 I/O）。
+
+### B.4 排障速查
+
+| 现象 | 根因 | 处置 |
+|---|---|---|
+| `FileNotFoundError: Path models/... not found` | 配置路径与磁盘目录不一致（含/不含 org 前缀） | 核对 `backend/models/` 实际目录名，按 B.3 约定书写 |
+| 启动日志刷 `INFO sqlalchemy.engine.Engine SELECT ...` | `DATABASE_ECHO=true` 或旧代码 `echo=is_development` | 置 `DATABASE_ECHO=false` 并重启；确认 `setup_logging()` 已收敛日志器 |
+| `WinError 10060` 请求 `huggingface.co/.../modules.json` | 本地权重未被识别，sentence-transformers 走 HF 探测 | 确认本地权重目录存在且命名符合 B.3；必要时设 `HF_ENDPOINT=https://hf-mirror.com` |
+| `PyMilvusDeprecationWarning: Collection.xxx will be removed` | 仍在使用 ORM-style API | 使用 `MilvusClient` 客户端 API（见 B.1） |
+| 前端请求后端 404 | 8000 端口被其他服务（如 Milvus Attu）占用，或 Vite 代理未指到后端实际端口 | 确认后端实际端口（默认 `8001`）；确认 `vite.config.ts` 中 `/api → localhost:8001`；排查时加 `--noproxy '*'` |

@@ -6,8 +6,16 @@ Lumos Server — FastAPI 应用入口.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import sys
+from pathlib import Path
+
+# 允许直接 `python app/main.py` 启动：将 backend/ 加入模块搜索路径
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,7 +132,6 @@ def create_app() -> FastAPI:
 
 # 应用实例 (供 uvicorn 直接引用: uvicorn app.main:app)
 app = create_app()
-
 
 # 允许直接 `python main.py` 启动 (免去记 uvicorn 命令)
 if __name__ == "__main__":

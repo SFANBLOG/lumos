@@ -15,18 +15,58 @@ BGE 系列检索约定: 仅对 query 追加指令前缀 (文档不做处理),
 
 from __future__ import annotations
 
+import os
 import threading
 from abc import ABC, abstractmethod
 from functools import lru_cache
+from pathlib import Path
 
 from loguru import logger
 
-from app.core.config import get_settings
+# 必须在 import sentence_transformers / huggingface_hub 之前设置,
+# 否则这些常量已在 import 时读取 huggingface.co,后续请求不会切换到镜像
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+from app.core.config import get_settings  # noqa: E402  (env 注入后再读配置)
 
 _EMBED_BATCH = 32
 
 #: BGE 中文检索 query 指令 (官方推荐; 仅对查询侧生效)
 _BGE_QUERY_INSTRUCTION_ZH = "为这个句子生成表示以用于检索相关文章："
+
+
+def _resolve_local_model(name: str) -> tuple[str, bool]:
+    """将 embedding 模型名解析为可直接传给 SentenceTransformer 的路径。
+
+    返回 (resolved_path, local_files_only)。当本地命中时强制
+    ``local_files_only=True``，跳过 sentence-transformers v3 对
+    ``modules.json`` / ``adapter_config.json`` 的 HF HEAD 探测（国内
+    huggingface.co 超时）。否则保留 ``local_files_only=False``，由库走
+    ``HF_ENDPOINT`` 镜像或正常 HF 仓库下载。
+
+    解析优先级：
+    1. 绝对路径 / 已存在的相对路径 → 直接返回
+    2. ``backend/models/<basename(name)>`` 命中 → 解析到绝对路径
+       （兼容 ``models/bge-base-zh-v1.5`` / ``BAAI/bge-base-zh-v1.5`` /
+       ``bge-base-zh-v1.5`` 等写法，与运行 CWD 无关）
+    3. 否则视为 HF repo id 走 ``HF_ENDPOINT`` 镜像
+    """
+    p = Path(name)
+    if p.is_absolute() and p.is_dir():
+        return str(p), True
+    if p.is_dir():
+        return str(p.resolve()), True
+
+    backend_root = Path(__file__).resolve().parents[2]  # backend/app/rag -> backend/app -> backend
+    basename = Path(name).name  # 取最后一段作为模型目录名, 与前缀无关
+    candidate = backend_root / "models" / basename
+    if candidate.is_dir():
+        return str(candidate), True
+
+    # 视为 HF repo id (走 HF_ENDPOINT 镜像)
+    return name, False
 
 
 class EmbeddingNotReadyError(RuntimeError):
@@ -83,9 +123,16 @@ class LocalSentenceTransformerEmbedder(EmbeddingProvider):
                 if self._model is None:
                     from sentence_transformers import SentenceTransformer
 
-                    logger.info(f"🆕 加载本地 embedding 模型: {self.model_name} (首次可能下载)")
-                    self._model = SentenceTransformer(self.model_name)
-                    logger.info(f"✅ embedding 模型就绪 | {self.model_name} | dim={self.dim}")
+                    # 解析模型路径: 相对路径时尝试在 backend/models/ 下查找;
+                    # 命中本地目录则强制 local_files_only=True,跳过 sentence-transformers v3
+                    # 对 modules.json / adapter_config.json 的 HF HEAD 探测 (国内 huggingface.co 超时)。
+                    resolved, local_only = _resolve_local_model(self.model_name)
+                    logger.info(
+                        f"🆕 加载 embedding 模型: {resolved} "
+                        f"(local_files_only={local_only})"
+                    )
+                    self._model = SentenceTransformer(resolved, local_files_only=local_only)
+                    logger.info(f"✅ embedding 模型就绪 | {resolved} | dim={self.dim}")
         return self._model
 
     def embed_query(self, text: str) -> list[float]:

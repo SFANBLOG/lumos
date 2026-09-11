@@ -7,11 +7,41 @@
 
 ---
 
+## [Unreleased]
+
+### 🔍 混合检索相关度分数优化
+
+- 🐛 **修复 Milvus COSINE 分数语义反转**：COSINE 度量的 `distance` 字段即余弦相似度（越大越相似），旧代码 `1 - distance` 导致得分与相关度背离；现直接裁剪至 [0, 1] 输出
+- 🧹 **BM25 过滤零分未命中文档**：查询词全未命中的文档此前仍进入 RRF 候选池并贡献名次分，稀释真实相关命中；现按分数降序在零分处截断，并新增 `__len__` 便于语料量断言
+- 📊 **相关度分数升级为通道真实分数加权**：`similarity` 从「仅位次常量」（双通道命中固定 0.5、单通道 0.3333…）改为 `HYBRID_VECTOR_WEIGHT`（默认 0.65）× 向量余弦 + 0.35 × BM25 通道内归一分；仅单通道命中时乘 `HYBRID_SINGLE_CHANNEL_FACTOR`（默认 0.85）折扣；无分数命中保留位次置信度兜底。真实链路实测：双通道命中 0.67~0.75、单通道向量命中 0.43~0.53，区分度显著提升
+- ⚙️ 新增配置项 `HYBRID_VECTOR_WEIGHT` / `HYBRID_SINGLE_CHANNEL_FACTOR`，根 `.env.example` 与 `backend/.env.example` 同步
+- 🧪 新增检索用例（无关查询返回空、双通道加权分数、单通道折扣）；检索 18 条 + 工作流 4 条测试全绿，离线评测三通道 hit@k/MRR 无回归
+
+---
+
+## [0.2.2] - 2026-09-10
+
+### 🔧 工程健壮性与运维
+
+- 🗄️ **Milvus 迁移至 `MilvusClient` 客户端 API**：`Collection.*` ORM-style 调用（`insert` / `flush` / `num_entities` / `search`）全部替换为客户端 API（`create_schema` / `prepare_index_params` / `insert` / `search` / `get_collection_stats`），消除 PyMilvus 3.x `PyMilvusDeprecationWarning`，向前兼容 PyMilvus 3.1+
+- 📝 **日志改造**：新增 `DATABASE_ECHO` 配置（默认 `false`），开发环境不再回显 SQL 刷屏；标准库 `sqlalchemy.*` 日志器默认收敛至 WARNING；日志文件由「仅生产」改为**开发/生产均落盘** `backend/logs/lumos_<日期>.log`（每日零点轮转、保留 30 天、gz 压缩、UTF-8、路径锚定不依赖启动 CWD）
+- 🐍 **Python 版本对齐**：`requires-python` / ruff `target-version` / mypy `python_version` 由 3.12 对齐到实际运行时 **3.11**，消除 IDE 对 `from __future__ import annotations` 的冗余告警
+- 🧭 **embedding 路径解析修复**：新增 `_resolve_local_model()`，任意 CWD 下均可把 `bge-base-zh-v1.5` / `models/bge-base-zh-v1.5` / `BAAI/bge-base-zh-v1.5` 解析到本地权重目录并强制 `local_files_only=True`，彻底跳过 sentence-transformers 对 `modules.json` / `adapter_config.json` 的 HF HEAD 探测（国内网络下会超时 `WinError 10060`）
+- 🧹 `.dockerignore` 排除 `logs/`；本地模型权重与运行日志均已 gitignore
+
+### 📚 文档
+
+- 🖼️ 根 README 与项目介绍文档补充 **Mermaid 架构图**（分层总览 / LangGraph + SSE 时序 / 混合检索 RRF 链路）
+- 📐 全量文档校准：Python 版本（3.12→3.11）、文件格式数（16 种）、项目结构（移除不存在的 `public/`，补 `models/`、`logs/`、`shots/`）、依赖安装命令（移除不存在的 `embedding` extra）、Milvus/BM25 降级口径（无 ChromaDB）
+- 🔐 `SECURITY.md` 修正与当前实现不符的隐私表述、报告入口改为 Gitee
+
+---
+
 ## [0.2.1] - 2026-09-09
 
 ### 🔄 Embedding 模型升级
 - 默认本地模型 `paraphrase-multilingual-MiniLM-L12-v2`（384 维）→ **`BAAI/bge-base-zh-v1.5`**（768 维中文检索）。
-- 模型权重落盘为扁平目录 `backend/models/BAAI/bge-base-zh-v1.5/`（宿主机持久化，容器只读挂载），不再使用 HF hub-cache 式 `snapshots/` 结构。
+- 模型权重落盘为扁平目录 `backend/models/bge-base-zh-v1.5/`（宿主机持久化，容器只读挂载，兼容 `BAAI/bge-base-zh-v1.5` 等写法），不再使用 HF hub-cache 式 `snapshots/` 结构。
 - 新增 BGE 检索约定：query 侧自动追加中文指令前缀（`embedding_query_instruction` 可覆盖），文档侧不加，提升语义召回精度。
 - Milvus 集合按 embedding 签名自动隔离，换模型后自动创建新集合，无需手工重建。
 
@@ -31,8 +61,10 @@
 - 🔎 新增 `rag/bm25_index.py`：法条语料 BM25 全文检索（jieba 分词 + 法律领域词典注册，修复「竞业限制」等法律术语切词）
 - 🧩 新增 `rag/hybrid.py`：**RRF（Reciprocal Rank Fusion）融合**向量 + BM25 双通道排序
 - 🗄️ 重构 `milvus_store.py`：动态维度（模型自动探测）、COSINE 度量、语料哈希 + embedding 签名双校验自动重建、集合名签名隔离
-- 🔀 重构 `vector_store.py`：`search_laws()` 混合检索入口（向量 → Milvus/Chroma 降级 + BM25 → RRF），`_channel` 通道打标归一
-- 🐛 修复生产缺陷：rank_bm25 查询须预分词（逐字符迭代产生伪分数）、Chroma 降级路径通道未打标
+- 🔀 重构 `vector_store.py`：`search_laws()` 混合检索入口（向量 Milvus + BM25 → RRF），`_channel` 通道打标归一
+- 🐛 修复生产缺陷：rank_bm25 查询须预分词（逐字符迭代产生伪分数）、降级路径通道未打标
+
+> 注：该版本的向量降级后端曾短暂包含 ChromaDB，已在后续版本移除——现向量通道唯一后端为 Milvus，不可用时仅保留 BM25。
 
 ### 🧪 测试与效果评测
 

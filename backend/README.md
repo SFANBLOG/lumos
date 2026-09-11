@@ -3,7 +3,16 @@
 Lumos · 契光鉴微 —— AI 合同风险排查引擎后端（FastAPI）。
 
 基于 **LangGraph 状态图**编排 4 阶段子智能体流水线（抽取 → 法规检索 → 风险审查 → 谈判策略），
-法规检索采用 **真实 embedding + Milvus/ChromaDB 向量 + BM25 关键词 + RRF 融合** 的混合检索链路。
+法规检索采用 **真实 embedding + Milvus 向量 + BM25 关键词 + RRF 融合** 的混合检索链路。
+
+```mermaid
+flowchart LR
+    API["FastAPI<br/>REST + SSE"] --> G["LangGraph StateGraph<br/>共享 AgentState"]
+    G --> N1["1 Extractor"] --> N2["2 Retriever"] --> N3["3 Reviewer"] --> N4["4 Negotiator"]
+    N2 --> RAG["Hybrid RAG<br/>Milvus 向量 + BM25 → RRF"]
+    G --> DB["MySQL 8<br/>SQLModel"]
+    API --> MCP["MCP Server<br/>4 工具"]
+```
 
 ## 技术栈
 
@@ -12,26 +21,34 @@ Lumos · 契光鉴微 —— AI 合同风险排查引擎后端（FastAPI）。
   - ExtractorAgent → RetrieverAgent → ReviewerAgent → NegotiatorAgent（+ ConsultantAgent 智能咨询）
 - **LLM**：LangChain `ChatOpenAI`（OpenAI 兼容接口：DeepSeek / Claude / 通义千问等）
 - **RAG 检索**（`app/rag/`）：
-  - embedding：`sentence-transformers` 本地模型（默认，384 维）或 API embedding，双通道可切换
-  - 向量库：Milvus（COSINE，集合按 embedding 签名隔离）→ ChromaDB 自动降级
+  - embedding：`sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维）或 API embedding，双通道可切换
+  - 向量库：Milvus（COSINE；集合名 = 基名 + embedding 签名哈希，换模型自动隔离重建；不可用时向量通道关闭，仅剩 BM25）
   - 关键词通道：BM25（rank-bm25 + jieba 中文分词，领域词典）
   - 融合：Reciprocal Rank Fusion（RRF），生产入口 `search_laws()`
 - **协议开放**：MCP Server + Client（JSON-RPC 2.0 over HTTP，4 个工具）
-- **其他**：SQLModel（开发 SQLite / Docker MySQL 8）、MinIO 对象存储、JWT + API-Key 认证、loguru
+- **其他**：SQLModel + aiomysql（MySQL 8）、MinIO 对象存储、JWT + API-Key 认证、loguru
 
 ## 快速开始
 
+> 要求 **Python 3.11+**（`pyproject.toml` `requires-python = ">=3.11"`）。
+
 ```bash
 cd backend
-pip install -e ".[dev,embedding]"   # embedding extra 提供本地真实向量模型
+pip install -e ".[dev]"      # 主依赖已含 sentence-transformers / pymilvus / rank-bm25 / jieba
 cp .env.example .env
 # 编辑 .env 填入 LLM_API_KEY 等 (embedding 默认本地模型, 无需 API Key)
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8001
+# 或直接: python app/main.py  (默认 0.0.0.0:8001)
 ```
 
-> embedding 通道说明：默认 `EMBEDDING_PROVIDER=local` 首次使用自动下载模型；
-> 也可设 `EMBEDDING_PROVIDER=api` 走 OpenAI 兼容 embedding 接口。切换模型/通道后
+> embedding 通道说明：默认 `EMBEDDING_PROVIDER=local`，权重目录约定为**扁平命名**
+> `backend/models/bge-base-zh-v1.5/`（已 gitignore）。目录命中即直接加载并跳过 HF 探测；
+> 缺失时按 `HF_ENDPOINT`（默认 `https://hf-mirror.com`）自动下载。也可设
+> `EMBEDDING_PROVIDER=api` 走 OpenAI 兼容 embedding 接口。切换模型/通道后
 > 向量集合按签名自动重建，无需手工清理。
+>
+> 日志：开发/生产均写入 `backend/logs/lumos_<日期>.log`（每日轮转、保留 30 天）；
+> SQL 回显默认关闭（`DATABASE_ECHO=false`），需要调试 SQL 时再开启。
 
 ## 目录结构
 
@@ -56,7 +73,10 @@ backend/
 │   ├── models/ schemas/ services/ skills/ core/ middleware/
 ├── eval/                    # 离线评测工具
 │   └── retrieval_eval.py    # data/contracts 金标准 hit@k 三通道对比
-└── tests/                   # pytest 单测 (pytest-cov 覆盖率)
+├── tests/                   # pytest 单测 (pytest-cov 覆盖率)
+├── models/                  # 本地 embedding 权重 (bge-base-zh-v1.5, gitignore)
+├── logs/                    # 运行日志 (每日轮转, gitignore)
+└── pyproject.toml           # 依赖与工具链配置 (requires-python >=3.11)
 ```
 
 ## 测试与效果评测
@@ -104,10 +124,11 @@ python -m eval.retrieval_eval --topk 5
 |---|---|---|
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_NAME` | — / deepseek / deepseek-chat | 主 LLM |
 | `EMBEDDING_PROVIDER` | `local` | `local`(sentence-transformers) \| `api` |
-| `EMBEDDING_MODEL_NAME` | `BAAI/bge-base-zh-v1.5` | 本地模型名（已预下载到 `models/BAAI/bge-base-zh-v1.5/`） |
+| `EMBEDDING_MODEL_NAME` | `BAAI/bge-base-zh-v1.5` | 本地模型名（预下载到 `models/bge-base-zh-v1.5/`；未命中时经 hf-mirror 自动拉取） |
 | `HYBRID_TOP_K_RATIO` / `RRF_K` | `2` / `60` | 混合检索融合参数 |
 | `MILVUS_HOST` / `MILVUS_PORT` | localhost / 19530 | 向量库 |
 | `DATABASE_URL` | mysql+aiomysql://... | SQLAlchemy 连接串（**不再支持 SQLite**，Docker 由 compose 注入） |
+| `DATABASE_ECHO` | `false` | 回显执行 SQL（调试用，默认关闭） |
 | `API_SECRET_KEY` | 空（鉴权关闭） | 非空时启用 X-API-Key 鉴权 |
 
 完整清单见 `backend/.env.example` 与 `app/core/config.py`。

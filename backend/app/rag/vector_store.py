@@ -4,7 +4,9 @@
 检索链路 (search_laws):
     1. 向量通道: Milvus (真实 embedding, COSINE);
     2. 关键词通道: BM25 全文检索 (jieba 分词, 内存索引);
-    3. 两通道结果经 Reciprocal Rank Fusion (RRF) 融合排序.
+    3. 两通道结果经 Reciprocal Rank Fusion (RRF) 融合排序;
+    4. 相关度分数 (similarity) 由两通道真实分数加权得出
+       (向量权重见 hybrid_vector_weight 配置), 单通道命中打折。
 
 向量通道唯一后端为 Milvus (非 sqlite, 无 ChromaDB 降级路径);
 Milvus 不可用时向量通道直接关闭, 仅保留 BM25 关键词检索, 应用仍可启动。
@@ -12,6 +14,8 @@ Milvus 不可用时向量通道直接关闭, 仅保留 BM25 关键词检索, 应
 """
 
 from __future__ import annotations
+
+from loguru import logger
 
 from app.core.config import get_settings
 from app.rag.bm25_index import bm25_search_laws
@@ -70,8 +74,6 @@ def search_laws(
     任一通道不可用时自动降级 (仅剩单通道也能工作); 两通道全部
     不可用时返回空列表并记录错误, 不抛出异常。
     """
-    from loguru import logger
-
     pool = max(1, n_results * max(1, settings.hybrid_top_k_ratio))
 
     vector_hits: list[dict] = []
@@ -92,10 +94,14 @@ def search_laws(
         logger.error("🚫 检索链路不可用: 向量通道与 BM25 通道均失败")
         return []
 
+    # 相关度分数加权: 向量权重来自配置, BM25 权重取其补数
+    vector_weight = min(1.0, max(0.0, settings.hybrid_vector_weight))
     fused = reciprocal_rank_fusion(
         [vector_hits, bm25_hits],
         top_k=n_results,
         rrf_k=settings.rrf_k,
+        channel_weights=[vector_weight, 1.0 - vector_weight],
+        single_channel_factor=min(1.0, max(0.0, settings.hybrid_single_channel_factor)),
     )
     logger.debug(
         f"[hybrid] 融合完成 | 候选: vector={len(vector_hits)} "
@@ -109,8 +115,6 @@ def search_laws(
 
 def init_vector_store() -> None:
     """初始化向量库 (应用启动时调用), 仅 Milvus."""
-    from loguru import logger
-
     try:
         # 尽早暴露 embedding 配置问题 (真实模型加载/连通性)
         from app.rag.embeddings import get_embedder

@@ -60,7 +60,11 @@ class TestBM25:
 
     def test_index_covers_full_corpus(self) -> None:
         index = BM25Index(ALL_LAWS)
-        assert len(index.search("任意查询文本", top_k=len(ALL_LAWS))) == len(ALL_LAWS)
+        assert len(index) == len(ALL_LAWS)
+
+    def test_unrelated_query_returns_empty(self) -> None:
+        """与语料无关键词重叠的查询返回空 (零分文档不进入候选池)."""
+        assert bm25_search_laws("量子芯片 区块链共识", top_k=5) == []
 
 
 # ─── RRF 融合 ───────────────────────────────────────────────────
@@ -87,6 +91,26 @@ class TestRRF:
         vector = [self._hit("劳动合同法", "第二十三条", "vector")]
         fused = reciprocal_rank_fusion([vector], top_k=1)
         assert 0 < fused[0]["similarity"] <= 1
+
+    def test_similarity_uses_channel_scores(self) -> None:
+        """双通道命中: 相关度 = 向量权重·余弦 + BM25权重·通道内归一分."""
+        vector = [{**self._hit("劳动合同法", "第二十三条", "vector"), "score": 0.6}]
+        bm25 = [{**self._hit("劳动合同法", "第二十三条", "bm25"), "score": 3.0}]
+        fused = reciprocal_rank_fusion(
+            [vector, bm25], top_k=1, channel_weights=[0.65, 0.35],
+        )
+        # 余弦 0.6 直接使用; BM25 3.0 为通道最高分 → 归一为 1.0
+        expected = 0.65 * 0.6 + 0.35 * 1.0
+        assert abs(fused[0]["similarity"] - expected) < 1e-4
+
+    def test_single_channel_similarity_discounted(self) -> None:
+        """单通道命中: 相关度 = 通道归一分 × 折扣因子."""
+        vector = [{**self._hit("劳动合同法", "第二十四条", "vector"), "score": 0.8}]
+        fused = reciprocal_rank_fusion(
+            [vector], top_k=1, channel_weights=[0.65, 0.35],
+            single_channel_factor=0.85,
+        )
+        assert abs(fused[0]["similarity"] - 0.8 * 0.85) < 1e-4
 
     def test_top_k_trimming(self) -> None:
         vector = [self._hit(f"法律{i}", f"第{i}条") for i in range(5)]
@@ -155,7 +179,8 @@ class TestHybridSearch:
 class TestEmbedders:
     def test_local_embedder_signature_and_dim(self, monkeypatch) -> None:
         class FakeSentenceTransformer:
-            def __init__(self, model_name: str) -> None:
+            def __init__(self, model_name: str, **kwargs: object) -> None:
+                # 真实库 v3 会传 local_files_only 等参数
                 self.model_name = model_name
 
             def encode(self, texts: list[str], **kwargs) -> _FakeEncoded:

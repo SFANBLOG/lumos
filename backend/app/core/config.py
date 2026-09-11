@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     # ── 数据库 (MySQL) ────────────────────────────────────────
     database_url: str = "mysql+aiomysql://lumos:lumos@localhost:3306/lumos"
+    # 是否回显执行 SQL (调试用; 默认关闭, 避免控制台/日志被 SELECT 刷屏)
+    database_echo: bool = False
 
     # ── AI 模型 ───────────────────────────────────────────────
     llm_api_key: str = ""
@@ -66,6 +68,10 @@ class Settings(BaseSettings):
     # ── 混合检索 (Milvus 向量 + BM25 + RRF 融合) ──────────────
     hybrid_top_k_ratio: int = 2  # 融合前各通道候选数 = top_k × 该值
     rrf_k: int = 60  # RRF 融合参数: score = Σ 1/(k + rank)
+    # 相关度分数 (similarity) 口径: 双通道命中 = 向量权重·余弦相似度 +
+    # (1-向量权重)·BM25归一; 仅单通道命中时再乘折扣因子
+    hybrid_vector_weight: float = 0.65  # 向量通道权重 (0~1, BM25 权重为其补数)
+    hybrid_single_channel_factor: float = 0.85  # 单通道命中的相关度折扣 (0~1)
 
     # ── 多模态视觉模型 (图片/扫描件 OCR) ─────────────────────
     # 复用 OpenAI 兼容接口; DeepSeek 无视觉能力, 默认走通义千问 VL (DashScope 兼容模式)。

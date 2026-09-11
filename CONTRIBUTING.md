@@ -40,14 +40,14 @@
 
 ## 开发环境搭建
 
-### 客户端 (Flutter)
+### 客户端 (Flutter, 已归档)
 
 ```bash
 # 确保已安装 Flutter 3.x+
 flutter --version
 
-# 进入客户端目录
-cd client
+# 进入客户端目录（遗留移动端已归档，原 client/）
+cd archive/client
 
 # 安装依赖
 flutter pub get
@@ -59,7 +59,7 @@ flutter run -d chrome
 ### 服务端 (Python)
 
 ```bash
-# 确保 Python 3.12+
+# 确保 Python 3.11+
 python --version
 
 # 进入服务端目录
@@ -69,7 +69,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 安装开发依赖（含测试与构建工具链）
+# 安装开发依赖（含测试与构建工具链；embedding 模型库已在主依赖中）
 pip install -e ".[dev]"
 
 # 准备环境变量并填入 AI API Key 等配置
@@ -77,6 +77,17 @@ cp .env.example .env  # Windows: copy .env.example .env
 
 # 启动开发服务器
 uvicorn app.main:app --reload
+```
+
+### Web 前端 (Vue 3)
+
+```bash
+# 确保 Node.js 18+
+node --version
+
+cd front
+npm install
+npm run dev   # http://localhost:5173（/api 已代理到 localhost:8001）
 ```
 
 > 若仅需体验全栈，可直接在仓库根目录执行 `docker compose up -d` 一键启动 MySQL / MinIO / Milvus / 后端 / Web。
@@ -184,23 +195,25 @@ Closes #12
 
 ```
 lumos/
-├── client/          # Flutter 客户端
-│   └── lib/
-│       ├── core/       # API、状态、路由、主题
-│       ├── features/   # 业务功能模块
-│       └── shared/     # 公共组件
 ├── front/           # Vue 3 Web 前端（原 web/）
-├── backend/         # Python FastAPI 服务端
+│   ├── src/            # api / layouts / router / stores / utils / views
+│   └── shots/          # 功能截图
+├── backend/         # Python FastAPI 服务端（Python 3.11+）
 │   ├── app/
-│   │   ├── agent/      # Multi-Agent 分析引擎
-│   │   ├── api/        # FastAPI 路由
-│   │   ├── mcp/        # MCP 工具服务
-│   │   ├── rag/        # 法条向量检索
-│   │   └── skills/     # 可复用技能
-│   └── tests/          # 后端测试
-├── docs/            # 项目文档
-├── data/            # 合同测试样本
-└── public/          # 静态资源
+│   │   ├── agent/      # LangGraph 多智能体编排（graph/state/sub_agents）
+│   │   ├── api/v1/     # FastAPI 路由（REST + SSE，19 端点）
+│   │   ├── rag/        # 混合检索（embedding / Milvus / BM25 / RRF）
+│   │   ├── mcp/        # MCP 协议服务（Server/Client/Tools）
+│   │   ├── services/   # 文本摄取（16 种格式 + OCR）
+│   │   └── skills/     # 可复用技能注册表
+│   ├── eval/           # 离线检索评测（hit@k / MRR）
+│   ├── tests/          # pytest 单测（27 条）
+│   ├── models/         # 本地 embedding 权重（gitignore）
+│   └── logs/           # 运行日志（gitignore）
+├── archive/client/  # 遗留 Flutter 客户端（已归档，原 client/）
+├── docs/            # 项目文档（technical-design.md）
+├── data/contracts/  # 合同测试语料（100 份，4 区分类）
+└── docker-compose.yml  # 7 容器一键编排
 ```
 
 ---

@@ -24,13 +24,29 @@ from sqlmodel import SQLModel
 from app.core.database import get_session
 from app.main import create_app
 
-# 测试数据库: 不再使用 SQLite, 改用 MySQL (docker-compose 或本机 MySQL)。
-# 可用环境变量 TEST_DATABASE_URL 覆盖 (默认指向 docker-compose 暴露的 3308 端口)。
+# 测试数据库: 与开发库 (backend/.env 的 DATABASE_URL) 同主机/凭据, 但库名固定为
+# lumos_test —— 测试 fixture 会建/删表, 必须与开发库隔离, 避免污染真实数据。
+# 可用环境变量 TEST_DATABASE_URL 覆盖 (例如 CI 自建的专用库)。
 import os
 
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL", "mysql+aiomysql://lumos:lumos@localhost:3308/lumos"
-)
+
+def _default_test_db_url() -> str:
+    """默认测试库地址: 解析 backend/.env 的开发库并替换库名为 lumos_test."""
+    fallback = "mysql+aiomysql://lumos:lumos@localhost:3308/lumos_test"
+    env_file = Path(__file__).resolve().parents[1] / ".env"
+    if not env_file.is_file():
+        return fallback
+    for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        raw = line.strip()
+        if not raw.startswith("DATABASE_URL=") or raw.startswith("#"):
+            continue
+        url = raw.split("=", 1)[1].strip().strip('"').strip("'")
+        head, _, _ = url.rpartition("/")
+        return f"{head}/lumos_test" if head else fallback
+    return fallback
+
+
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", _default_test_db_url())
 
 
 @pytest.fixture

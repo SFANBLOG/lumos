@@ -3,7 +3,8 @@ BM25 全文检索索引 (混合检索的关键词通道).
 
 对法条语料做 jieba 中文分词后构建 BM25Okapi 倒排索引, 提供关键词
 词频召回, 与 Milvus 向量通道经 RRF 融合为混合检索结果。
-语料仅 29 条条文, 索引驻留内存, 检索成本可忽略。
+零分 (未命中查询词) 文档不进入候选池, 避免无关键词重叠的条文
+给 RRF 融合引入噪声。语料仅 29 条条文, 索引驻留内存, 检索成本可忽略。
 """
 
 from __future__ import annotations
@@ -74,6 +75,10 @@ class BM25Index:
             # 旧版 (<0.2.2) 无 tokenizer 参数: 预分词后传入
             self._bm25 = BM25Okapi([zh_tokenize(d) for d in raw_docs])
 
+    def __len__(self) -> int:
+        """索引中的文档数 (与语料条数一致)."""
+        return len(self._laws)
+
     def search(
         self,
         query: str,
@@ -85,6 +90,8 @@ class BM25Index:
 
         查询一律先经 zh_tokenize 切成 token 序列再打分 (与索引分词口径
         一致; rank_bm25 不会对 query 自动分词)。
+        零分文档 (未命中任何查询词) 不进入候选: 否则会以 rank 形式
+        混入 RRF 融合, 稀释真实相关命的排序与相关度分数。
         """
         scores = self._bm25.get_scores(zh_tokenize(query))
 
@@ -95,6 +102,8 @@ class BM25Index:
         )
         hits: list[dict] = []
         for idx, score in ranked:
+            if score <= 0:
+                break  # 降序排列, 后续均为零分
             law = self._laws[idx]
             if category and law.get("category") != category:
                 continue

@@ -19,7 +19,7 @@ settings = get_settings()
 # 异步引擎
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.is_development,
+    echo=settings.database_echo,
     future=True,
     pool_pre_ping=True,
 )
