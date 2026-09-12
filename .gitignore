@@ -92,6 +92,9 @@ backend/models/
 
 # 个人简历/非项目文档 (勿入库)
 简历_项目介绍.md
+Agent面试题库.md
+docs/Agent面试题库.md
+docs/个人/*.md
 
 # ---- Flutter / Dart ----
 # Client-specific ignores are in client/.gitignore
