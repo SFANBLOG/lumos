@@ -88,8 +88,14 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60 * 24 * 7  # 7 天
 
     # ── Milvus ───────────────────────────────────────────────
+    # 两套连接模式, 通过 MILVUS_USE_URI 切换:
+    #   - false (默认, 本地/单机): 用 MILVUS_HOST + MILVUS_PORT 连接 (如 localhost:19530)
+    #   - true (托管/Serverless): 用 MILVUS_URI + MILVUS_TOKEN 连接 (如 Zilliz Cloud)
+    milvus_use_uri: bool = False
     milvus_host: str = "localhost"
     milvus_port: int = 19530
+    milvus_uri: str = ""  # 例: https://in01-xxxx.zillizcloud.com
+    milvus_token: str = ""  # Zilliz Cloud: api key; 用户名:密码 也可
     # 基集合名; 实际集合名 = 基名 + embedding 签名后缀, 换模型自动隔离重建
     milvus_collection: str = "labor_laws"
 

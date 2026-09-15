@@ -34,7 +34,20 @@ def collection_full_name() -> str:
 
 @lru_cache
 def get_milvus_client() -> MilvusClient:
-    """获取 (缓存) Milvus 客户端连接."""
+    """获取 (缓存) Milvus 客户端连接.
+
+    支持两种连接模式 (由 ``MILVUS_USE_URI`` 切换):
+    - ``false`` (默认, 本地/单机): ``MilvusClient(host=..., port=...)``
+    - ``true`` (托管/Serverless, 如 Zilliz Cloud):
+      ``MilvusClient(uri=..., token=...)`` 一致接口.
+    """
+    if settings.milvus_use_uri:
+        if not settings.milvus_uri:
+            raise RuntimeError(
+                "MILVUS_USE_URI=true 但 MILVUS_URI 未配置 "
+                "(托管模式需要 URI, 如 Zilliz Cloud 的 https://in01-xxx.zillizcloud.com)"
+            )
+        return MilvusClient(uri=settings.milvus_uri, token=settings.milvus_token or "")
     return MilvusClient(host=settings.milvus_host, port=str(settings.milvus_port))
 
 
