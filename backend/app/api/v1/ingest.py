@@ -18,7 +18,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import AuthAny
-from app.core.minio_client import upload_file
+from app.core.minio_client import StorageUnavailableError, upload_file
 from app.services.text_extractor import (
     ServiceNotReadyError,
     extract_by_ext,
@@ -32,7 +32,10 @@ _MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _MAX_URL_SIZE = 2 * 1024 * 1024  # 2 MB 网页正文
 _USER_AGENT = "Mozilla/5.0 (compatible; LumosBot/0.2; +https://lumos.local)"
 
-_ALLOWED_EXT = {"pdf", "txt", "docx", "csv", "md", "html", "htm", "rtf", "xlsx", "pptx"}
+_ALLOWED_EXT = {
+    "pdf", "txt", "docx", "csv", "md", "html", "htm", "rtf", "xlsx", "pptx",
+    "png", "jpg", "jpeg", "gif", "webp", "bmp",
+}
 _ALLOWED_MIME = {
     "pdf": "application/pdf",
     "txt": "text/plain",
@@ -85,12 +88,15 @@ async def ingest_file(
 
     # 原文存档 MinIO, 便于后续追溯
     object_name = f"ingest/{uuid.uuid4()}.{ext}"
-    upload_file(
-        object_name=object_name,
-        data=data,
-        length=len(data),
-        content_type=file.content_type or _ALLOWED_MIME.get(ext, "application/octet-stream"),
-    )
+    try:
+        upload_file(
+            object_name=object_name,
+            data=data,
+            length=len(data),
+            content_type=file.content_type or _ALLOWED_MIME.get(ext, "application/octet-stream"),
+        )
+    except StorageUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     try:
         text, scanned = extract_by_ext(ext, data)

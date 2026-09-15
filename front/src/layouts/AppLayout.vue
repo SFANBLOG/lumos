@@ -12,43 +12,35 @@
       >
         <el-menu-item index="/dashboard" @click="nav('/dashboard')">
           <el-icon><Odometer /></el-icon>
-          <span>主看板</span>
+          <span>工作台</span>
         </el-menu-item>
         <el-menu-item index="/analysis" @click="nav('/analysis')">
           <el-icon><Document /></el-icon>
-          <span>智能分析</span>
+          <span>AI 审查</span>
         </el-menu-item>
 
-        <!-- 智能咨询: 可展开, 下含「新对话」与历史会话子项 -->
-        <el-sub-menu index="consult">
-          <template #title>
-            <el-icon><ChatLineRound /></el-icon>
-            <span>智能咨询</span>
-          </template>
-          <el-menu-item index="/consult" @click="nav('/consult')">
-            <el-icon><Plus /></el-icon>
-            <span>新对话</span>
-          </el-menu-item>
-          <el-menu-item
-            v-for="s in consult.sessions"
-            :key="s.id"
-            :index="`/consult?s=${s.id}`"
-            @click="navSession(s.id)"
-          >
-            <el-icon><ChatLineSquare /></el-icon>
-            <span class="session-title" :title="s.title">{{ s.title || '未命名会话' }}</span>
-          </el-menu-item>
-        </el-sub-menu>
+        <el-menu-item index="/consult" @click="nav('/consult')">
+          <el-icon><ChatLineRound /></el-icon><span>法律助理</span>
+        </el-menu-item>
 
         <el-menu-item index="/reports" @click="nav('/reports')">
           <el-icon><Clock /></el-icon>
-          <span>历史报告</span>
+          <span>合同库</span>
         </el-menu-item>
         <el-menu-item index="/mcp" @click="nav('/mcp')">
           <el-icon><MagicStick /></el-icon>
-          <span>MCP 工具</span>
+          <span>知识与工具</span>
         </el-menu-item>
       </el-menu>
+      <section class="session-panel">
+        <div class="session-head"><span>历史对话</span><el-button link type="primary" @click="nav('/consult')"><el-icon><Plus /></el-icon> 新建</el-button></div>
+        <div v-if="consult.sessions.length" class="session-list">
+          <button v-for="s in consult.sessions.slice(0, 5)" :key="s.id" class="session-row" :class="{ active: route.query.s === s.id }" @click="navSession(s.id)">
+            <el-icon><ChatLineSquare /></el-icon><span :title="s.title">{{ s.title || '未命名会话' }}</span>
+          </button>
+        </div>
+        <button v-else class="empty-session" @click="nav('/consult')">暂无历史对话<br><small>从新建对话开始咨询</small></button>
+      </section>
     </el-aside>
 
     <el-container class="body">
@@ -132,7 +124,7 @@ onMounted(() => {
   height: 100vh;
 }
 .aside {
-  background: #ffffff;
+  background: #10233f;
   border-right: 1px solid #ebeef5;
   display: flex;
   flex-direction: column;
@@ -151,29 +143,35 @@ onMounted(() => {
 .logo-name {
   font-size: 20px;
   font-weight: 700;
-  color: #303133;
+  color: #ffffff;
   letter-spacing: 0.5px;
 }
 .logo-sub {
   font-size: 12px;
-  color: #909399;
+  color: #9fb2cc;
   letter-spacing: 6px;
   transform: translateX(3px);
 }
 .side-menu {
+  --el-menu-bg-color: #10233f;
+  --el-menu-text-color: #c8d4e3;
+  --el-menu-active-color: #ffffff;
   border-right: none;
-  flex: 1;
+  flex: 0 0 auto;
   padding-top: 8px;
   overflow-y: auto;
 }
+.session-panel { margin: auto 10px 12px; border: 1px solid rgba(183,204,230,.22); border-radius: 10px; padding: 10px; color:#dbe8f8; }
+.session-head { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#9fb2cc; margin-bottom:8px; }.session-head .el-button{padding:0}
+.session-list{display:grid;gap:3px}.session-row,.empty-session{border:0;background:transparent;color:#dbe8f8;text-align:left;width:100%;border-radius:6px;padding:8px;cursor:pointer;font:inherit}.session-row{display:flex;gap:8px;align-items:center}.session-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-row:hover,.session-row.active{background:#1a355c}.empty-session{text-align:center;color:#9fb2cc;line-height:1.7}.empty-session small{font-size:11px}
 .side-menu .el-menu-item {
   margin: 2px 8px;
   border-radius: 6px;
   height: 44px;
 }
 .side-menu .el-menu-item.is-active {
-  background: #ecf5ff;
-  color: #409eff;
+  background: #1f5eff;
+  color: #ffffff;
   font-weight: 500;
 }
 /* 子菜单内的项: 去掉外侧 8px 边距, 依靠 EP 自带的缩进对齐 */

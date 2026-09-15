@@ -13,7 +13,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import func
@@ -23,6 +23,7 @@ from app.agent.graph import run_contract_analysis
 from app.api.deps import AuthAny, DBSession
 from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
+from app.services.audit import record_audit_event
 from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse, SSEEventType
 from app.schemas.contract import (
     ContractCreateRequest,
@@ -163,6 +164,7 @@ async def submit_contract(
     request: ContractCreateRequest,
     session: DBSession,
     _auth: AuthAny,
+    http_request: Request,
 ) -> ContractSubmitResponse:
     """提交合同文本进行 AI 风险排查."""
     logger.info(
@@ -182,6 +184,15 @@ async def submit_contract(
 
     session.add(contract)
     await session.flush()  # 获取 ID, 但不提交事务 (由 get_session 管理)
+    await record_audit_event(
+        session,
+        action="contract.submitted",
+        resource_type="contract",
+        resource_id=contract.id,
+        request_id=getattr(http_request.state, "request_id", None),
+        ip_address=http_request.client.host if http_request.client else None,
+        details={"source": request.source.value, "char_count": len(request.text)},
+    )
 
     logger.info(f"✅ 合同记录已创建 | ID: {contract.id}")
 
@@ -204,6 +215,7 @@ async def submit_contract(
 async def stream_analysis(
     contract_id: str,
     session: DBSession,
+    _auth: AuthAny,
 ) -> StreamingResponse:
     """SSE 流式推送合同分析进度."""
     # 查找合同

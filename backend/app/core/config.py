@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_host: str = "0.0.0.0"
     app_port: int = 8000
+    # 逗号分隔。生产环境务必只填写实际的前端域名；同域部署可以留空。
+    cors_origins: str = ""
+    trusted_hosts: str = "*"
+    # 首个企业管理员白名单（逗号分隔）；匹配邮箱注册后自动授予 owner。
+    bootstrap_owner_emails: str = ""
 
     # ── 数据库 (MySQL) ────────────────────────────────────────
     database_url: str = "mysql+aiomysql://lumos:lumos@localhost:3306/lumos"
@@ -105,6 +110,9 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "lumos"
     minio_secure: bool = False
+    # 外部依赖不可用时的连接超时；避免开发机未启动容器时阻塞应用启动。
+    dependency_connect_timeout_seconds: float = 2.0
+    dependency_read_timeout_seconds: float = 5.0
 
     # ── 日志 ──────────────────────────────────────────────────
     log_level: str = "DEBUG"
@@ -126,6 +134,20 @@ class Settings(BaseSettings):
     def auth_enabled(self) -> bool:
         """只在 api_secret_key 非空时启用鉴权."""
         return bool(self.api_secret_key)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """将环境变量中的逗号分隔来源解析为 CORS 白名单。"""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def trusted_host_list(self) -> list[str]:
+        """将受信任 Host 配置解析为 Starlette 可用的列表。"""
+        return [host.strip() for host in self.trusted_hosts.split(",") if host.strip()]
+
+    @property
+    def bootstrap_owner_email_set(self) -> set[str]:
+        return {email.strip().lower() for email in self.bootstrap_owner_emails.split(",") if email.strip()}
 
 
 @lru_cache

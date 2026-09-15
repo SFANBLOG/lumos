@@ -15,8 +15,8 @@ export const useAuthStore = defineStore('auth', () => {
     await fetchUser()
   }
 
-  const register = async (username: string, email: string, password: string) => {
-    await authApi.register({ username, email, password })
+  const register = async (username: string, email: string, password: string, captchaToken: string, captchaAnswer: string) => {
+    await authApi.register({ username, email, password, captcha_token: captchaToken, captcha_answer: captchaAnswer })
   }
 
   const fetchUser = async () => {

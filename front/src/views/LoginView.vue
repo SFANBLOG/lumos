@@ -18,6 +18,8 @@
       </el-form>
       <div class="extra">
         <el-link type="primary" @click="$router.push('/register')">还没有账号？去注册</el-link>
+        <el-divider direction="vertical" />
+        <el-link type="primary" @click="$router.push('/forgot-password')">忘记密码？</el-link>
       </div>
     </el-card>
   </div>

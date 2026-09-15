@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import secrets
 
 from jose import JWTError, jwt
 
@@ -54,3 +55,24 @@ def decode_access_token(token: str) -> dict:
         settings.jwt_secret_key,
         algorithms=[settings.jwt_algorithm],
     )
+
+
+def create_captcha_challenge() -> tuple[str, str]:
+    """生成五分钟有效、由服务端签名的算术验证码挑战。"""
+    left = secrets.randbelow(9) + 1
+    right = secrets.randbelow(9) + 1
+    token = jwt.encode(
+        {"type": "captcha", "answer": str(left + right), "exp": datetime.now(UTC) + timedelta(minutes=5)},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+    return f"{left} + {right} = ?", token
+
+
+def verify_captcha_challenge(token: str, answer: str) -> bool:
+    """验证验证码签名、有效期和答案。"""
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        return payload.get("type") == "captcha" and secrets.compare_digest(str(payload.get("answer", "")), answer.strip())
+    except JWTError:
+        return False

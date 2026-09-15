@@ -10,11 +10,16 @@ from functools import lru_cache
 
 from loguru import logger
 from minio import Minio
-from minio.error import S3Error
+from urllib3 import PoolManager
+from urllib3.util import Timeout
 
 from app.core.config import get_settings
 
 settings = get_settings()
+
+
+class StorageUnavailableError(RuntimeError):
+    """对象存储暂不可用，调用方应返回可重试的 503。"""
 
 
 @lru_cache
@@ -25,6 +30,13 @@ def get_minio_client() -> Minio:
         access_key=settings.minio_access_key,
         secret_key=settings.minio_secret_key,
         secure=settings.minio_secure,
+        http_client=PoolManager(
+            timeout=Timeout(
+                connect=settings.dependency_connect_timeout_seconds,
+                read=settings.dependency_read_timeout_seconds,
+            ),
+            retries=False,
+        ),
     )
     return client
 
@@ -52,23 +64,20 @@ def upload_file(
     Returns:
         存储的对象名 (object_name)
     """
-    client = get_minio_client()
-    bucket = bucket or settings.minio_bucket
-    ensure_bucket(bucket)
+    try:
+        client = get_minio_client()
+        bucket = bucket or settings.minio_bucket
+        ensure_bucket(bucket)
 
-    # minio SDK put_object 需要可读流, 兼容直接传 bytes 的调用方
-    if isinstance(data, bytes):
-        import io
+        # minio SDK put_object 需要可读流, 兼容直接传 bytes 的调用方
+        if isinstance(data, bytes):
+            import io
+            data = io.BytesIO(data)
 
-        data = io.BytesIO(data)
-
-    client.put_object(
-        bucket,
-        object_name,
-        data,
-        length,
-        content_type=content_type,
-    )
+        client.put_object(bucket, object_name, data, length, content_type=content_type)
+    except Exception as exc:
+        logger.warning("对象存储不可用，上传请求被拒绝: {}", type(exc).__name__)
+        raise StorageUnavailableError("对象存储暂不可用，请稍后重试") from exc
     logger.info(f"☁️ 文件上传成功 | bucket={bucket} | object={object_name}")
     return object_name
 
@@ -85,9 +94,5 @@ def get_presigned_url(
 
 
 def init_minio() -> None:
-    """应用启动时初始化 MinIO bucket."""
-    try:
-        ensure_bucket()
-        logger.info(f"☁️ MinIO 就绪 | bucket: {settings.minio_bucket}")
-    except Exception as e:
-        logger.error(f"❌ MinIO 初始化失败: {e}")
+    """声明对象存储为按需初始化，避免依赖未启动拖慢 API 可用性。"""
+    logger.info(f"☁️ MinIO 将在首次文件上传时连接 | bucket: {settings.minio_bucket}")

@@ -29,6 +29,8 @@ from app.agent.sub_agents.extractor_agent import ExtractorAgent
 from app.agent.sub_agents.negotiator_agent import NegotiatorAgent
 from app.agent.sub_agents.retriever_agent import RetrieverAgent
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
+from app.agent.sub_agents.quality_gate_agent import QualityGateAgent
+from app.agent.sub_agents.obligation_agent import ObligationAgent
 from app.models.analysis import AnalysisResult, RiskItem
 from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 
@@ -37,6 +39,8 @@ _NODE_SEQ: list[tuple[str, str]] = [
     ("extractor", "📝 结构化抽取 — 正在整理合同条款…"),
     ("retriever", "⚖️ 法规检索 — 正在查询相关劳动法条文…"),
     ("reviewer", "🔍 风险审查 — 正在逐项评估风险…"),
+    ("quality_gate", "✅ 证据质检 — 正在核验风险依据…"),
+    ("obligation", "📅 合同运营 — 正在提取期限与义务…"),
     ("negotiator", "🗣️ 谈判策略 — 正在生成沟通话术…"),
 ]
 
@@ -46,6 +50,8 @@ _AGENTS: dict[str, BaseAgent] = {
         ExtractorAgent(),
         RetrieverAgent(),
         ReviewerAgent(),
+        QualityGateAgent(),
+        ObligationAgent(),
         NegotiatorAgent(),
     ]
 }
@@ -191,6 +197,9 @@ async def run_contract_analysis(
             "total_clauses": len(final_state.extracted_clauses),
             "total_risks": len(final_state.risk_assessments),
             "legal_references_count": len(final_state.legal_references),
+            "confidence_score": final_state.confidence_score,
+            "quality_issues": final_state.quality_issues,
+            "contract_facts": final_state.contract_facts,
         },
     )
 

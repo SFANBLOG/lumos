@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1.router import v1_router
 from app.core.config import get_settings
@@ -107,11 +108,14 @@ def create_app() -> FastAPI:
     # ── CORS 跨域 ──
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.is_development else [],
-        allow_credentials=True,
+        allow_origins=["*"] if settings.is_development else settings.cors_origin_list,
+        # 浏览器带凭据时不能使用 CORS 通配符；生产环境只启用显式来源。
+        allow_credentials=not settings.is_development and bool(settings.cors_origin_list),
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if not settings.is_development and settings.trusted_host_list != ["*"]:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list)
 
     # ── 注册 API 路由 ──
     app.include_router(v1_router)

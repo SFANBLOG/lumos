@@ -14,6 +14,7 @@ from app.agent.base import BaseAgent
 from app.agent.state import AgentState, RiskAssessment
 from app.models.analysis import RiskCategory, RiskLevel
 from app.mcp.client import MCPClient
+from app.agent.playbooks import render_playbook
 
 REVIEWER_SYSTEM_PROMPT = """\
 你是一位站在劳动者立场的合同风险审查专家。请综合合同条款和相关法律条文，对每一条可能存在风险的条款进行评估。
@@ -107,7 +108,7 @@ class ReviewerAgent(BaseAgent):
 
     @staticmethod
     def _build_context(state: AgentState) -> str:
-        parts = ["## 合同条款:\n"]
+        parts = [render_playbook(), "\n## 合同条款:\n"]
         for clause in state.extracted_clauses:
             cat = f" [{clause.category.value}]" if clause.category else ""
             parts.append(f"### 第 {clause.clause_index} 条{cat}: {clause.title}\n{clause.content}\n")

@@ -1,5 +1,9 @@
 <template>
   <div class="dashboard" v-loading="loading">
+    <section class="hero">
+      <div><span class="eyebrow">LUMOS AGENT OPERATIONS</span><h1>合同审查控制台</h1><p>将企业 Playbook、证据质检与人工审批置于同一条可审计工作流。</p></div>
+      <div class="hero-actions"><el-button type="primary" size="large" @click="goAnalysis('file')">提交审查任务</el-button><el-button size="large" @click="goReports">进入合同库</el-button></div>
+    </section>
     <!-- 统计卡片 -->
     <el-row :gutter="16" class="stat-row">
       <el-col :span="6">
@@ -35,6 +39,11 @@
           <div class="stat-extra">满分 100 分</div>
         </div>
       </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="ops-row">
+      <el-col :span="15"><el-card shadow="never" class="pipeline"><template #header><div class="card-head"><span class="card-title">Agent 执行链路</span><el-tag type="success">实时可追溯</el-tag></div></template><div class="steps"><div><b>01</b><span>合同接入</span><small>文本 / 文档 / OCR</small></div><div><b>02</b><span>Playbook</span><small>企业审查标准</small></div><div><b>03</b><span>证据质检</span><small>原文与法条核验</small></div><div><b>04</b><span>人工复核</span><small>审批与审计</small></div></div></el-card></el-col>
+      <el-col :span="9"><el-card shadow="never" class="review"><template #header><span class="card-title">待处理事项</span></template><div class="review-num">{{ stats?.high_risk_contracts ?? 0 }}</div><p>高风险合同等待人工复核</p><el-button link type="primary" @click="goReports">查看审查队列 →</el-button></el-card></el-col>
     </el-row>
 
     <!-- 快捷入口 -->
@@ -140,6 +149,7 @@ onMounted(fetchStats)
 .stat-row {
   margin-bottom: 16px;
 }
+.hero{background:linear-gradient(125deg,#10233f,#1f5eff);color:#fff;border-radius:14px;padding:28px 32px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}.hero h1{margin:5px 0;font-size:26px}.hero p{margin:0;color:#cbd9f2}.eyebrow{font-size:11px;letter-spacing:1.5px;color:#9fc0ff}.hero-actions{display:flex;gap:10px}.ops-row{margin-bottom:16px}.pipeline,.review{height:170px}.steps{display:flex;justify-content:space-between;gap:8px}.steps div{display:grid;gap:5px;flex:1}.steps b{color:#1f5eff;font-size:20px}.steps span{font-weight:600}.steps small,.review p{color:#909399}.review-num{font-size:34px;font-weight:700;color:#e96b6b}
 .stat-card {
   background: #ffffff;
   border-radius: 8px;

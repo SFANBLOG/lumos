@@ -95,6 +95,9 @@ class AgentState(BaseModel):
         description="整体风险等级",
     )
     summary: str = Field(default="", description="一句话总结")
+    confidence_score: int = Field(default=100, ge=0, le=100, description="证据完整性置信度")
+    quality_issues: list[str] = Field(default_factory=list, description="待人工复核项")
+    contract_facts: dict = Field(default_factory=dict, description="合同运营要素与义务")
 
     # ── 流程控制 ──
     current_node: str = Field(default="", description="当前执行的节点名称")
