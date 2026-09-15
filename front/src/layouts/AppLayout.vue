@@ -31,6 +31,12 @@
           <el-icon><MagicStick /></el-icon>
           <span>知识与工具</span>
         </el-menu-item>
+        <el-menu-item index="/playbooks" @click="nav('/playbooks')">
+          <el-icon><Notebook /></el-icon><span>审查标准</span>
+        </el-menu-item>
+        <el-menu-item index="/approvals" @click="nav('/approvals')">
+          <el-icon><Finished /></el-icon><span>审批队列</span>
+        </el-menu-item>
       </el-menu>
       <section class="session-panel">
         <div class="session-head"><span>历史对话</span><el-button link type="primary" @click="nav('/consult')"><el-icon><Plus /></el-icon> 新建</el-button></div>
@@ -68,7 +74,9 @@ import {
   Clock,
   Document,
   MagicStick,
+  Notebook,
   Odometer,
+  Finished,
   Plus,
   User,
 } from '@element-plus/icons-vue'

@@ -58,6 +58,18 @@ const router = createRouter({
           component: () => import('@/views/MCPView.vue'),
           meta: { title: 'MCP 工具' },
         },
+        {
+          path: 'approvals',
+          name: 'Approvals',
+          component: () => import('@/views/ApprovalsView.vue'),
+          meta: { title: '审批队列' },
+        },
+        {
+          path: 'playbooks',
+          name: 'Playbooks',
+          component: () => import('@/views/PlaybooksView.vue'),
+          meta: { title: '审查标准' },
+        },
       ],
     },
   ],
