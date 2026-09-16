@@ -25,6 +25,38 @@ _SYSTEM_PROMPT = """你是 Lumos 的劳动法律顾问，站在劳动者（打�
 5. 若提供了关联合同报告的上下文，结合其中的风险项作答。"""
 
 
+def _rag_fallback_answer(
+    question: str,
+    laws: list[dict[str, Any]],
+    contract_context: str | None,
+) -> str:
+    """模型服务不可用时，以检索证据生成不编造结论的可读兜底答案。"""
+    lines = [
+        "**检索型法律提示**",
+        f"你咨询的是：{question}",
+        "当前模型服务暂不可用，以下内容仅依据已检索到的法条整理，不替代律师意见。",
+    ]
+    if laws:
+        lines.append("\n**可直接核对的法律依据**")
+        for index, law in enumerate(laws, start=1):
+            excerpt = law["content"].strip()
+            lines.append(f"[{index}] {law['law_name']} {law['article']}：{excerpt}")
+        lines.append(
+            "\n**建议下一步**\n"
+            "1. 保留劳动合同、工资流水、考勤、沟通记录等证据；\n"
+            "2. 先与单位书面协商并明确诉求；\n"
+            "3. 协商不成可向当地劳动监察部门投诉或申请劳动仲裁。"
+        )
+    else:
+        lines.append(
+            "\n当前知识库未检索到直接适用的法条。建议补充合同条款、所在地和具体时间线，"
+            "或向当地劳动监察部门、工会咨询。"
+        )
+    if contract_context:
+        lines.append("\n**关联报告提示**\n" + contract_context)
+    return "\n".join(lines)
+
+
 class ConsultantAgent(BaseAgent):
     """智能咨询子智能体（不参与合同分析状态流）."""
 
@@ -100,9 +132,14 @@ class ConsultantAgent(BaseAgent):
 
         # 3. LLM 作答
         yield {"type": "step", "message": "正在组织回答…"}
-        content = await self.invoke_llm("\n\n".join(prompt_parts), temperature=0.3)
+        try:
+            content = await self.invoke_llm("\n\n".join(prompt_parts), temperature=0.3)
+        except Exception as exc:  # noqa: BLE001
+            # 额度、网络或模型供应商故障不能让 RAG 咨询变成“只见提问不见回答”。
+            logger.warning(f"[consultant] LLM 不可用，返回 RAG 兜底回答: {exc}")
+            content = _rag_fallback_answer(cleaned, laws, contract_context)
         if not content:
-            content = "抱歉，本次没能生成有效回答，请换个问法再试一次。"
+            content = _rag_fallback_answer(cleaned, laws, contract_context)
 
         # 4. 追问建议
         suggestions: list[str] = []

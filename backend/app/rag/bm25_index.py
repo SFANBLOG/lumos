@@ -44,10 +44,18 @@ def _register_domain_lexicon() -> None:
 
 
 def zh_tokenize(text: str) -> list[str]:
-    """中文分词: jieba 精确模式 (含领域词典), 过滤空白 token."""
+    """中文分词，并保留复合查询中包含的领域短语。
+
+    例如 jieba 可能把“竞业限制补偿”视为一个词，但法条语料通常分别
+    标注“竞业限制”“经济补偿”。同时保留两种粒度，避免 BM25 漏召回。
+    """
     import jieba
 
-    return [t.strip() for t in jieba.lcut(text) if t.strip()]
+    tokens = [t.strip() for t in jieba.lcut(text) if t.strip()]
+    for term in _DOMAIN_LEXICON:
+        if term in text and term not in tokens:
+            tokens.append(term)
+    return tokens
 
 
 _register_domain_lexicon()  # 模块导入即注册, 保证索引与查询同一分词口径

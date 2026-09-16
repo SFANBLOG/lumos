@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 
 # ── 《中华人民共和国劳动合同法》(2012修正) ────────────────────
@@ -257,14 +258,48 @@ ANNUAL_LEAVE: list[dict] = [
     },
 ]
 
+# ── 合同审查常用配套法规（重点条款）────────────────────────────
+# 来源：国务院、人力资源社会保障部门公开现行文本。完整劳动合同法见 data/。
+SUPPLEMENTARY_LABOR_RULES: list[dict] = [
+    {"law_name": "劳动合同法实施条例", "article": "第五条", "content": "自用工之日起一个月内，经用人单位书面通知后，劳动者不与用人单位订立书面劳动合同的，用人单位应当书面通知劳动者终止劳动关系，无需向劳动者支付经济补偿，但是应当依法向劳动者支付其实际工作时间的劳动报酬。", "keywords": ["书面劳动合同", "一个月", "终止劳动关系"], "category": "job_description"},
+    {"law_name": "劳动合同法实施条例", "article": "第六条", "content": "用人单位自用工之日起超过一个月不满一年未与劳动者订立书面劳动合同的，应当依照劳动合同法第八十二条的规定向劳动者每月支付两倍的工资，并与劳动者补订书面劳动合同。", "keywords": ["未签合同", "双倍工资", "补订合同"], "category": "salary_deduction"},
+    {"law_name": "劳动合同法实施条例", "article": "第二十一条", "content": "劳动者达到法定退休年龄的，劳动合同终止。", "keywords": ["退休年龄", "劳动合同终止"], "category": "resignation"},
+    {"law_name": "工资支付暂行规定", "article": "第六条", "content": "用人单位应将工资支付给劳动者本人。劳动者本人因故不能领取工资时，可由其亲属或委托他人代领。用人单位可委托银行代发工资。", "keywords": ["工资支付", "本人领取", "银行代发"], "category": "salary_deduction"},
+    {"law_name": "工资支付暂行规定", "article": "第七条", "content": "工资必须在用人单位与劳动者约定的日期支付。如遇节假日或休息日，则应提前在最近的工作日支付。工资至少每月支付一次。", "keywords": ["发薪日", "按月支付", "工资"], "category": "salary_deduction"},
+    {"law_name": "工资支付暂行规定", "article": "第九条", "content": "劳动关系双方依法解除或终止劳动合同时，用人单位应在解除或终止劳动合同时一次付清劳动者工资。", "keywords": ["离职", "结清工资", "终止合同"], "category": "resignation"},
+    {"law_name": "最低工资规定", "article": "第十二条", "content": "在劳动者提供正常劳动的情况下，用人单位应支付给劳动者的工资在剔除下列各项以后，不得低于当地最低工资标准：延长工作时间工资；中班、夜班、高温、低温、井下、有毒有害等特殊工作环境、条件下的津贴；法律、法规和国家规定的劳动者福利待遇等。", "keywords": ["最低工资", "加班费", "津贴"], "category": "probation_salary"},
+    {"law_name": "女职工劳动保护特别规定", "article": "第五条", "content": "用人单位不得因女职工怀孕、生育、哺乳降低其工资、予以辞退、与其解除劳动或者聘用合同。", "keywords": ["怀孕", "生育", "哺乳", "不得辞退"], "category": "resignation"},
+    {"law_name": "女职工劳动保护特别规定", "article": "第七条", "content": "女职工生育享受98天产假，其中产前可以休假15天；难产的，应增加产假15天；生育多胞胎的，每多生育1个婴儿，可增加产假15天。", "keywords": ["产假", "98天", "难产"], "category": "leave_rights"},
+    {"law_name": "女职工劳动保护特别规定", "article": "第九条", "content": "对哺乳未满1周岁婴儿的女职工，用人单位不得延长劳动时间或者安排夜班劳动。用人单位应当在每天的劳动时间内为哺乳期女职工安排1小时哺乳时间。", "keywords": ["哺乳期", "夜班", "哺乳时间"], "category": "leave_rights"},
+    {"law_name": "工伤保险条例", "article": "第十四条", "content": "职工有下列情形之一的，应当认定为工伤：在工作时间和工作场所内，因工作原因受到事故伤害的；工作时间前后在工作场所内，从事与工作有关的预备性或者收尾性工作受到事故伤害的；在工作时间和工作场所内，因履行工作职责受到暴力等意外伤害的等。", "keywords": ["工伤认定", "工作时间", "工作场所"], "category": "general"},
+    {"law_name": "工伤保险条例", "article": "第十七条", "content": "职工发生事故伤害或者按照职业病防治法规定被诊断、鉴定为职业病，所在单位应当自事故伤害发生之日或者被诊断、鉴定为职业病之日起30日内，向统筹地区社会保险行政部门提出工伤认定申请。", "keywords": ["工伤认定申请", "30日", "职业病"], "category": "general"},
+    {"law_name": "劳动保障监察条例", "article": "第九条", "content": "任何组织或者个人对违反劳动保障法律、法规或者规章的行为，有权向劳动保障行政部门举报。劳动者认为用人单位侵犯其劳动保障合法权益的，有权向劳动保障行政部门投诉。", "keywords": ["劳动监察", "投诉", "举报"], "category": "jurisdiction"},
+    {"law_name": "劳动保障监察条例", "article": "第二十条", "content": "违反劳动保障法律、法规或者规章的行为在2年内未被劳动保障行政部门发现，也未被举报、投诉的，劳动保障行政部门不再查处。前款规定的期限，自违反劳动保障法律、法规或者规章的行为发生之日起计算；违反行为有连续或者继续状态的，自行为终了之日起计算。", "keywords": ["劳动监察", "两年", "投诉时效"], "category": "jurisdiction"},
+    {"law_name": "国务院关于职工工作时间的规定", "article": "第三条", "content": "职工每日工作8小时、每周工作40小时。", "keywords": ["八小时", "四十小时", "工时"], "category": "leave_rights"},
+    {"law_name": "职工带薪年休假条例", "article": "第二条", "content": "机关、团体、企业、事业单位、民办非企业单位、有雇工的个体工商户等单位的职工连续工作1年以上的，享受带薪年休假。", "keywords": ["带薪年休假", "连续工作一年"], "category": "leave_rights"},
+]
+
 # ── 汇总所有法条 ───────────────────────────────────────────────
 
+def _load_full_labor_contract_law() -> list[dict]:
+    """优先使用内置的完整 98 条语料，文件缺失时保留核心条款降级能力。"""
+    path = Path(__file__).with_name("data") / "labor_contract_law_2012.json"
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        if len(rows) == 98:
+            return rows
+    except (OSError, json.JSONDecodeError):
+        pass
+    return LABOR_CONTRACT_LAW
+
+
 ALL_LAWS: list[dict] = (
-    LABOR_CONTRACT_LAW
+    _load_full_labor_contract_law()
     + LABOR_LAW
     + SOCIAL_INSURANCE_LAW
     + ARBITRATION_LAW
     + ANNUAL_LEAVE
+    + SUPPLEMENTARY_LABOR_RULES
 )
 
 

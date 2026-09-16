@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     # (1-向量权重)·BM25归一; 仅单通道命中时再乘折扣因子
     hybrid_vector_weight: float = 0.65  # 向量通道权重 (0~1, BM25 权重为其补数)
     hybrid_single_channel_factor: float = 0.85  # 单通道命中的相关度折扣 (0~1)
+    # ── 重排 / 精排 ───────────────────────────────────────────
+    # 先以轻量可解释精排收敛 RRF 候选；生产可开启 CrossEncoder 进一步做语义重排。
+    reranker_enabled: bool = False
+    reranker_model_name: str = "BAAI/bge-reranker-base"
+    reranker_candidate_multiplier: int = 3
+    reranker_max_length: int = 512
+    retrieval_min_similarity: float = 0.05
 
     # ── 多模态视觉模型 (图片/扫描件 OCR) ─────────────────────
     # 复用 OpenAI 兼容接口; DeepSeek 无视觉能力, 默认走通义千问 VL (DashScope 兼容模式)。

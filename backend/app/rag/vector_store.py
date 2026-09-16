@@ -27,6 +27,7 @@ from app.rag.embeddings import (
     embed_texts,
 )
 from app.rag.hybrid import reciprocal_rank_fusion
+from app.rag.reranker import rerank_candidates
 from app.rag.law_corpus import ALL_LAWS, corpus_hash
 
 settings = get_settings()
@@ -74,7 +75,10 @@ def search_laws(
     任一通道不可用时自动降级 (仅剩单通道也能工作); 两通道全部
     不可用时返回空列表并记录错误, 不抛出异常。
     """
-    pool = max(1, n_results * max(1, settings.hybrid_top_k_ratio))
+    pool = max(
+        1,
+        n_results * max(1, settings.hybrid_top_k_ratio, settings.reranker_candidate_multiplier),
+    )
 
     vector_hits: list[dict] = []
     try:
@@ -98,16 +102,17 @@ def search_laws(
     vector_weight = min(1.0, max(0.0, settings.hybrid_vector_weight))
     fused = reciprocal_rank_fusion(
         [vector_hits, bm25_hits],
-        top_k=n_results,
+        top_k=pool,
         rrf_k=settings.rrf_k,
         channel_weights=[vector_weight, 1.0 - vector_weight],
         single_channel_factor=min(1.0, max(0.0, settings.hybrid_single_channel_factor)),
     )
+    ranked = rerank_candidates(query, fused, top_k=n_results)
     logger.debug(
         f"[hybrid] 融合完成 | 候选: vector={len(vector_hits)} "
-        f"bm25={len(bm25_hits)} → {len(fused)} 条"
+        f"bm25={len(bm25_hits)} → RRF={len(fused)} → 精排={len(ranked)} 条"
     )
-    return fused
+    return ranked
 
 
 # ── 初始化 ─────────────────────────────────────────────────────

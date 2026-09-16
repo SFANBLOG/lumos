@@ -48,7 +48,9 @@ def get_milvus_client() -> MilvusClient:
                 "(托管模式需要 URI, 如 Zilliz Cloud 的 https://in01-xxx.zillizcloud.com)"
             )
         return MilvusClient(uri=settings.milvus_uri, token=settings.milvus_token or "")
-    return MilvusClient(host=settings.milvus_host, port=str(settings.milvus_port))
+    # MilvusClient 2.4+/pymilvus 2.5 的稳定连接入口是 uri；传 host/port
+    # 在部分版本会被忽略并静默回退为 localhost，容器部署时必然连错服务。
+    return MilvusClient(uri=f"http://{settings.milvus_host}:{settings.milvus_port}")
 
 
 def _drop_legacy_collection(client: MilvusClient, full_name: str) -> None:

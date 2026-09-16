@@ -1,6 +1,6 @@
 <template>
   <el-container class="app-layout">
-    <el-aside width="200px" class="aside">
+    <el-aside width="232px" class="aside">
       <div class="logo">
         <div class="logo-name">Lumos</div>
         <div class="logo-sub">契光鉴微</div>
@@ -10,33 +10,17 @@
         :default-openeds="defaultOpeneds"
         class="side-menu"
       >
-        <el-menu-item index="/dashboard" @click="nav('/dashboard')">
-          <el-icon><Odometer /></el-icon>
-          <span>工作台</span>
-        </el-menu-item>
-        <el-menu-item index="/analysis" @click="nav('/analysis')">
-          <el-icon><Document /></el-icon>
-          <span>AI 审查</span>
-        </el-menu-item>
-
-        <el-menu-item index="/consult" @click="nav('/consult')">
-          <el-icon><ChatLineRound /></el-icon><span>法律助理</span>
-        </el-menu-item>
-
-        <el-menu-item index="/reports" @click="nav('/reports')">
-          <el-icon><Clock /></el-icon>
-          <span>合同库</span>
-        </el-menu-item>
-        <el-menu-item index="/mcp" @click="nav('/mcp')">
-          <el-icon><MagicStick /></el-icon>
-          <span>知识与工具</span>
-        </el-menu-item>
-        <el-menu-item index="/playbooks" @click="nav('/playbooks')">
-          <el-icon><Notebook /></el-icon><span>审查标准</span>
-        </el-menu-item>
-        <el-menu-item index="/approvals" @click="nav('/approvals')">
-          <el-icon><Finished /></el-icon><span>审批队列</span>
-        </el-menu-item>
+        <div class="menu-group">概览</div>
+        <el-menu-item index="/dashboard" @click="nav('/dashboard')"><el-icon><Odometer /></el-icon><span>工作台</span></el-menu-item>
+        <div class="menu-group">审查协作</div>
+        <el-menu-item index="/analysis" @click="nav('/analysis')"><el-icon><Document /></el-icon><span>AI 审查</span></el-menu-item>
+        <el-menu-item index="/approvals" @click="nav('/approvals')"><el-icon><Finished /></el-icon><span>审批队列</span></el-menu-item>
+        <el-menu-item index="/consult" @click="nav('/consult')"><el-icon><ChatLineRound /></el-icon><span>法律助理</span></el-menu-item>
+        <div class="menu-group">合同资产</div>
+        <el-menu-item index="/reports" @click="nav('/reports')"><el-icon><Clock /></el-icon><span>合同库</span></el-menu-item>
+        <div class="menu-group">治理与洞察</div>
+        <el-menu-item index="/playbooks" @click="nav('/playbooks')"><el-icon><Notebook /></el-icon><span>审查标准</span></el-menu-item>
+        <el-menu-item index="/mcp" @click="nav('/mcp')"><el-icon><MagicStick /></el-icon><span>知识与工具</span></el-menu-item>
       </el-menu>
       <section class="session-panel">
         <div class="session-head"><span>历史对话</span><el-button link type="primary" @click="nav('/consult')"><el-icon><Plus /></el-icon> 新建</el-button></div>
@@ -132,24 +116,24 @@ onMounted(() => {
   height: 100vh;
 }
 .aside {
-  background: #10233f;
-  border-right: 1px solid #ebeef5;
+  background: var(--ink-950);
+  border-right: 1px solid rgba(255,255,255,.08);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 .logo {
-  height: 72px;
+  height: 88px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   gap: 2px;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid rgba(255,255,255,.1);
   flex-shrink: 0;
 }
 .logo-name {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   color: #ffffff;
   letter-spacing: 0.5px;
@@ -161,24 +145,27 @@ onMounted(() => {
   transform: translateX(3px);
 }
 .side-menu {
-  --el-menu-bg-color: #10233f;
-  --el-menu-text-color: #c8d4e3;
+  --el-menu-bg-color: var(--ink-950);
+  --el-menu-text-color: #b9c9da;
   --el-menu-active-color: #ffffff;
   border-right: none;
-  flex: 0 0 auto;
-  padding-top: 8px;
+  flex: 1 1 auto;
+  padding: 14px 10px 0;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
-.session-panel { margin: auto 10px 12px; border: 1px solid rgba(183,204,230,.22); border-radius: 10px; padding: 10px; color:#dbe8f8; }
-.session-head { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#9fb2cc; margin-bottom:8px; }.session-head .el-button{padding:0}
-.session-list{display:grid;gap:3px}.session-row,.empty-session{border:0;background:transparent;color:#dbe8f8;text-align:left;width:100%;border-radius:6px;padding:8px;cursor:pointer;font:inherit}.session-row{display:flex;gap:8px;align-items:center}.session-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-row:hover,.session-row.active{background:#1a355c}.empty-session{text-align:center;color:#9fb2cc;line-height:1.7}.empty-session small{font-size:11px}
+.session-panel { margin: 12px 14px 16px; border: 1px solid rgba(169,193,220,.2); border-radius: 10px; padding: 12px; color:#dbe8f8; background:rgba(255,255,255,.025); flex-shrink:0; }
+.session-head { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#aebfd2; margin-bottom:8px; }.session-head .el-button{padding:0}
+.session-list{display:grid;gap:3px}.session-row,.empty-session{border:0;background:transparent;color:#dbe8f8;text-align:left;width:100%;border-radius:6px;padding:8px;cursor:pointer;font:inherit}.session-row{display:flex;gap:8px;align-items:center}.session-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.session-row:hover,.session-row.active{background:rgba(92,139,220,.22)}.empty-session{text-align:center;color:#9fb2cc;line-height:1.7}.empty-session small{font-size:11px}
 .side-menu .el-menu-item {
-  margin: 2px 8px;
+  margin: 3px 0;
   border-radius: 6px;
-  height: 44px;
+  height: 38px;
+  line-height: 38px;
 }
+.menu-group { padding: 13px 12px 5px; color: #7188a2; font-size: 10px; font-weight: 700; letter-spacing: 1.1px; line-height: 1; }
 .side-menu .el-menu-item.is-active {
-  background: #1f5eff;
+  background: #1d4ed8;
   color: #ffffff;
   font-weight: 500;
 }
@@ -204,16 +191,16 @@ onMounted(() => {
   min-width: 0;
 }
 .header {
-  height: 60px;
+  height: 64px;
   background: #ffffff;
   border-bottom: 1px solid #ebeef5;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 32px;
 }
 .page-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
   color: #303133;
 }
@@ -230,8 +217,8 @@ onMounted(() => {
   font-size: 14px;
 }
 .main {
-  background: #f5f7fa;
-  padding: 20px;
+  background: var(--canvas);
+  padding: 28px 32px;
   overflow-y: auto;
 }
 </style>
