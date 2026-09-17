@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <content url="file://$MODULE_DIR$">
+      <!-- 将 backend 标记为 Sources Root，使 app.xxx 相对导入被正确解析 -->
+      <sourceFolder url="file://$MODULE_DIR$/backend" isTestSource="false" />
+      <!-- 排除无需索引的大目录/缓存目录，提升 IDE 性能 -->
+      <excludeFolder url="file://$MODULE_DIR$/.workbuddy" />
+      <excludeFolder url="file://$MODULE_DIR$/archive" />
+      <excludeFolder url="file://$MODULE_DIR$/front/node_modules" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/models" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/logs" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/htmlcov" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/.pytest_cache" />
+      <excludeFolder url="file://$MODULE_DIR$/backend/__pycache__" />
+    </content>
+    <!-- SDK 名称需与 PyCharm 中配置的 Python 解释器名称一致，见 README 或设置步骤 -->
+    <orderEntry type="jdk" jdkName="Python 3.11 (lumos)" jdkType="Python SDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

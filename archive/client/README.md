@@ -1,6 +1,6 @@
-# 📱 Lumos Client
+# 📱 契光鉴微 移动端
 
-Lumos 契光鉴微 - AI 劳动合同风险排查助手（Flutter 客户端）
+契光鉴微 - AI 劳动合同风险排查助手（Flutter 客户端）
 
 ## 技术栈
 

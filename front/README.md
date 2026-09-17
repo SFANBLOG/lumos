@@ -1,6 +1,6 @@
-# 💻 Lumos Web
+# 💻 契光鉴微 Web 端
 
-Lumos 契光鉴微 - Vue 3 + TypeScript Web 前端
+契光鉴微 - Vue 3 + TypeScript Web 前端
 
 ## 技术栈
 

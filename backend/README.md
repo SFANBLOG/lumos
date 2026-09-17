@@ -1,6 +1,6 @@
-# Lumos Server
+# 契光鉴微 服务端
 
-Lumos · 契光鉴微 —— AI 合同风险排查引擎后端（FastAPI）。
+契光鉴微 —— AI 合同风险排查引擎后端（FastAPI）。
 
 基于 **LangGraph 状态图**编排 4 阶段子智能体流水线（抽取 → 法规检索 → 风险审查 → 谈判策略），
 法规检索采用 **真实 embedding + Milvus 向量 + BM25 关键词 + RRF 融合** 的混合检索链路。
