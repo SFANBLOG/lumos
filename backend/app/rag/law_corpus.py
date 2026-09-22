@@ -9,6 +9,9 @@
 - keywords: 关键词标签 (辅助检索)
 - category: 关联的风险分类
 
+扩展条文 (劳务派遣/医疗期/就业歧视/格式条款/个人信息保护等)
+见 ``app.rag.law_corpus_ext``，与本模块合并后构成完整语料。
+
 数据来源: 中国政府法律法规数据库公开信息
 """
 
@@ -17,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+
+from app.rag.law_corpus_ext import EXTENDED_RULES
 
 
 # ── 《中华人民共和国劳动合同法》(2012修正) ────────────────────
@@ -300,6 +305,7 @@ ALL_LAWS: list[dict] = (
     + ARBITRATION_LAW
     + ANNUAL_LEAVE
     + SUPPLEMENTARY_LABOR_RULES
+    + EXTENDED_RULES
 )
 
 
