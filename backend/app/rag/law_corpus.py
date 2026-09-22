@@ -1,15 +1,23 @@
 """
-中国劳动法核心条文知识库.
+中国劳动法条文知识库.
 
-包含《劳动合同法》《劳动法》《社会保险法》等核心法律的
-重点条文，用于 RAG 语义检索。每条包含:
+收录 14 部现行劳动法律法规的**完整条文** (政府官网公开文本)，用于 RAG 语义检索:
+《劳动合同法》(2012修正) 《劳动法》(2018修正) 《社会保险法》(2018修正)
+《劳动争议调解仲裁法》《就业促进法》(2015修正) 《劳动争议司法解释二》(法释〔2025〕12号)
+《劳动合同法实施条例》《职工带薪年休假条例》《女职工劳动保护特别规定》
+《工伤保险条例》(2010修订) 《劳动保障监察条例》《工资支付暂行规定》
+《最低工资规定》《国务院关于职工工作时间的规定》
+
+完整条文存放于 data/*.json，每条包含:
 - law_name: 法律名称
 - article: 条文编号
 - content: 条文原文
 - keywords: 关键词标签 (辅助检索)
 - category: 关联的风险分类
+- source: 政府公开文本来源
 
-数据来源: 中国政府法律法规数据库公开信息
+数据来源: gov.cn / npc.gov.cn / court.gov.cn / mohrss.gov.cn 公开现行文本。
+本模块内保留各法核心条文列表，仅在 JSON 文件缺失时降级使用。
 """
 
 from __future__ import annotations
@@ -281,26 +289,64 @@ SUPPLEMENTARY_LABOR_RULES: list[dict] = [
 
 # ── 汇总所有法条 ───────────────────────────────────────────────
 
-def _load_full_labor_contract_law() -> list[dict]:
-    """优先使用内置的完整 98 条语料，文件缺失时保留核心条款降级能力。"""
-    path = Path(__file__).with_name("data") / "labor_contract_law_2012.json"
-    try:
-        rows = json.loads(path.read_text(encoding="utf-8"))
-        if len(rows) == 98:
-            return rows
-    except (OSError, json.JSONDecodeError):
-        pass
-    return LABOR_CONTRACT_LAW
+#: 完整条文 JSON (data/ 目录) 与文件缺失时的核心条款降级列表
+_FULL_CORPUS_FILES: list[str] = [
+    "labor_contract_law_2012.json",
+    "labor_law_2018.json",
+    "social_insurance_law_2018.json",
+    "arbitration_law_2007.json",
+    "employment_promotion_law_2015.json",
+    "judicial_interpretation_labor_2025.json",
+    "labor_contract_law_impl_regulation.json",
+    "annual_paid_leave_regulation.json",
+    "female_employee_protection_regulation.json",
+    "work_injury_insurance_regulation.json",
+    "labor_security_supervision_regulation.json",
+    "wage_payment_provisional_regulation.json",
+    "minimum_wage_regulation.json",
+    "working_hours_regulation.json",
+]
+
+_FALLBACK_LAWS: list[list[dict]] = [
+    LABOR_CONTRACT_LAW,
+    LABOR_LAW,
+    SOCIAL_INSURANCE_LAW,
+    ARBITRATION_LAW,
+    ANNUAL_LEAVE,
+    SUPPLEMENTARY_LABOR_RULES,
+]
 
 
-ALL_LAWS: list[dict] = (
-    _load_full_labor_contract_law()
-    + LABOR_LAW
-    + SOCIAL_INSURANCE_LAW
-    + ARBITRATION_LAW
-    + ANNUAL_LEAVE
-    + SUPPLEMENTARY_LABOR_RULES
-)
+def _load_full_corpus() -> list[dict]:
+    """加载 data/ 下全部完整条文; 文件缺失的法律回退到内置核心条款."""
+    data_dir = Path(__file__).with_name("data")
+    laws: list[dict] = []
+    loaded_names: set[str] = set()
+    for fname in _FULL_CORPUS_FILES:
+        try:
+            rows = json.loads((data_dir / fname).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(rows, list) or not rows:
+            continue
+        loaded_names.update(row["law_name"] for row in rows)
+        laws.extend(rows)
+    for fallback in _FALLBACK_LAWS:
+        for row in fallback:
+            if row["law_name"] not in loaded_names:
+                laws.append(row)
+    # 按 (law_name, article) 去重, 保留首次出现
+    seen: set[tuple[str, str]] = set()
+    unique: list[dict] = []
+    for law in laws:
+        key = (law["law_name"], law["article"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(law)
+    return unique
+
+
+ALL_LAWS: list[dict] = _load_full_corpus()
 
 
 def corpus_hash() -> str:

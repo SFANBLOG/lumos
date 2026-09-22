@@ -43,11 +43,11 @@ class TestBM25:
         assert all(t.strip() for t in tokens)
 
     def test_hits_competition_clause_on_keywords(self) -> None:
-        """竞业限制关键词应命中 non_compete 类条文 (top2 内)."""
-        hits = bm25_search_laws("竞业限制 两年内 同业", top_k=3)
+        """竞业限制关键词应命中 non_compete 类条文 (top2 内, 语料含司法解释二)."""
+        hits = bm25_search_laws("竞业限制 违约金 高级管理人员", top_k=3)
         assert len(hits) == 3
         assert all(h["category"] == "non_compete" for h in hits[:2])
-        assert hits[0]["law_name"] == "劳动合同法"
+        assert any(h["law_name"] == "劳动合同法" for h in hits)
 
     def test_leave_rights_hits_annual_leave(self) -> None:
         hits = bm25_search_laws("年休假 累计工作满一年 年休假五天", top_k=2)

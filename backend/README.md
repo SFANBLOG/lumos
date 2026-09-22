@@ -63,7 +63,7 @@ backend/
 │   │   └── sub_agents/     # extractor/retriever/reviewer/negotiator/consultant
 │   ├── api/v1/             # REST/SSE 路由 (19 个端点)
 │   ├── rag/                # 混合检索链路
-│   │   ├── law_corpus.py   # 法条语料 (5 部法规 29 条条文) + 语料哈希
+│   │   ├── law_corpus.py   # 法条语料 (14 部法律法规完整条文) + 语料哈希
 │   │   ├── embeddings.py   # 真实 embedding 双通道 (local/api)
 │   │   ├── bm25_index.py   # BM25 关键词通道 (jieba + 领域词典)
 │   │   ├── milvus_store.py # Milvus 向量库 (COSINE/签名集合隔离)
