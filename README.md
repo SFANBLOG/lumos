@@ -48,7 +48,7 @@
 | **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取，PDF/Word 同样支持 |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
-| **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
+| **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Quality Gate → Obligation → Negotiate 六节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
 | **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = Milvus 向量 + BM25（jieba 分词）双通道 → **RRF 融合**，答案可溯源到具体法条 |
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
@@ -97,7 +97,7 @@
 | 技术 | 说明 |
 |:---|:---|
 | FastAPI (Python 3.11+) | 极速异步框架 + 自动 Swagger 文档 |
-| LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → negotiate，共享 Pydantic `AgentState` |
+| LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → quality_gate → obligation → negotiate，共享 Pydantic `AgentState` |
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
 | 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
@@ -131,9 +131,11 @@ flowchart TB
         N1["1 ExtractorAgent<br/>抽取 · OCR 纠错 · 条款结构化"]
         N2["2 RetrieverAgent<br/>混合检索召回法条"]
         N3["3 ReviewerAgent<br/>风险评级 · 评分 · 法条依据"]
-        N4["4 NegotiatorAgent<br/>谈判话术生成"]
-        N5["ConsultantAgent<br/>独立智能咨询"]
-        N1 --> N2 --> N3 --> N4
+        N4["4 QualityGateAgent<br/>证据质检 · 核验风险依据（规则）"]
+        N5["5 ObligationAgent<br/>合同运营 · 提取期限与义务（规则）"]
+        N6["6 NegotiatorAgent<br/>谈判话术生成"]
+        NC["ConsultantAgent<br/>独立智能咨询"]
+        N1 --> N2 --> N3 --> N4 --> N5 --> N6
     end
 
     subgraph L4["④ 检索链路 · Hybrid RAG"]
@@ -190,6 +192,14 @@ sequenceDiagram
     L-->>G: 风险条目 + 法条依据 + 话术
     G-->>U: RISK_FOUND 逐条推送
 
+    G-->>U: NODE_START quality_gate
+    G->>G: 证据质检 · 核验风险依据（规则引擎）
+    G-->>U: NODE_COMPLETE quality_gate
+
+    G-->>U: NODE_START obligation
+    G->>G: 合同运营 · 提取期限与义务（规则引擎）
+    G-->>U: NODE_COMPLETE obligation
+
     G-->>U: NODE_START negotiator
     G->>L: 为缺失项补全谈判话术
     G-->>U: SUMMARY + COMPLETE
@@ -201,7 +211,7 @@ sequenceDiagram
 
 ## 六、Agent 与 MCP 架构
 
-### 6.1 LangGraph 工作流（4 个节点，由子智能体执行）
+### 6.1 LangGraph 工作流（6 个节点，由子智能体执行）
 
 ```
 StateGraph(AgentState)
@@ -217,6 +227,10 @@ StateGraph(AgentState)
  │     └─ skills: legal_analysis, risk_scoring
  │     └─ 工具: risk_assess, clause_analyze
  ▼
+ ├─ ✅ quality_gate — QualityGateAgent（证据质检 · 核验风险依据，规则引擎）
+ ▼
+ ├─ 📅 obligation   — ObligationAgent （合同运营 · 提取期限与义务，规则引擎）
+ ▼
  └─ 💬 negotiator   — NegotiatorAgent （谈判策略生成）
        └─ 工具: negotiation
  ▼
@@ -228,6 +242,8 @@ StateGraph(AgentState)
 | ExtractorAgent | `extractor` | 合同文本清洗、OCR 纠错、条款结构化拆分 |
 | RetrieverAgent | `retriever` | 劳动法条文混合检索（向量 + BM25 + RRF）、RAG 召回 |
 | ReviewerAgent | `reviewer` | 风险多维度打分、法律依据生成、谈判话术 |
+| QualityGateAgent | `quality_gate` | 证据质检：核验风险原文定位与法律依据，产出 quality_issues 与置信分（规则引擎，不调 LLM） |
+| ObligationAgent | `obligation` | 合同运营：提取日期/金额/持续义务等要素，产出 contract_facts（规则引擎，不调 LLM） |
 | NegotiatorAgent | `negotiator` | 补充谈判话术，确保每条风险都有应对策略 |
 
 **额外独立智能体：**
