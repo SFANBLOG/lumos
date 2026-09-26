@@ -53,6 +53,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:  # noqa: BLE001
         logger.error(f"❌ 数据库初始化失败 (关系型功能将不可用, 请检查 DATABASE_URL/MySQL): {e}")
 
+    # 对账上代进程遗留的 analyzing 孤儿记录 (内存任务随进程重启丢失)
+    try:
+        from app.services.analysis_task import reconcile_orphans
+
+        await reconcile_orphans()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"分析任务对账失败: {e}")
+
     # 初始化向量库 (后台执行: 加载本地 embedding 模型 + 写入 Milvus 可能耗时较长,
     # 不阻塞服务启动; /health 立即可用, 向量通道在模型就绪后自动上线)
     import asyncio

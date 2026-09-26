@@ -1,9 +1,9 @@
 """
 LangGraph 合同审查工作流.
 
-以 LangGraph ``StateGraph`` 编排 4 个阶段节点:
+以 LangGraph ``StateGraph`` 编排 6 个阶段节点:
 
-    extract → retrieve → review → negotiate
+    extract → retrieve → review → quality_gate → obligation → negotiate
 
 节点间共享 pydantic ``AgentState``; 每个节点包装一个子智能体执行,
 节点内产生的事件 (THINKING / NODE_COMPLETE / RISK_FOUND) 按序累积进

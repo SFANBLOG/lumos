@@ -3,7 +3,7 @@ LangGraph 工作流测试.
 
 以 monkeypatch 注入假 LLM 输出与 MCP 工具结果, 不依赖真实大模型/
 Milvus/MinIO 等外部服务, 验证:
-- 图节点顺序与状态推进 (extract → retrieve → review → negotiate);
+- 图节点顺序与状态推进 (extract → retrieve → review → quality_gate → obligation → negotiate);
 - SSE 事件流协议时序 (NODE_START/NODE_COMPLETE/RISK_FOUND/SUMMARY/COMPLETE);
 - 子智能体失败时的降级与 THINKING 事件。
 """
@@ -119,10 +119,17 @@ def _collect(agen: AsyncGenerator[SSEEvent, None]) -> list[SSEEvent]:
 
 
 class TestWorkflowGraph:
-    def test_graph_contains_four_stage_nodes(self) -> None:
+    def test_graph_contains_six_stage_nodes(self) -> None:
         graph = build_contract_graph()
         node_names = set(graph.get_graph().nodes.keys())
-        assert {"extractor", "retriever", "reviewer", "negotiator"} <= node_names
+        assert {
+            "extractor",
+            "retriever",
+            "reviewer",
+            "quality_gate",
+            "obligation",
+            "negotiator",
+        } <= node_names
 
     def test_state_flows_through_pipeline(self, fake_llm, fake_mcp) -> None:
         import asyncio
@@ -132,7 +139,14 @@ class TestWorkflowGraph:
             graph.ainvoke(AgentState(contract_id="g-1", raw_text=_CONTRACT_TEXT))
         )
         st = raw if isinstance(raw, AgentState) else AgentState(**raw)
-        assert st.agent_trace == ["extractor", "retriever", "reviewer", "negotiator"]
+        assert st.agent_trace == [
+            "extractor",
+            "retriever",
+            "reviewer",
+            "quality_gate",
+            "obligation",
+            "negotiator",
+        ]
         assert len(st.extracted_clauses) == 2
         assert len(st.legal_references) >= 1
         assert len(st.risk_assessments) == 1
@@ -153,6 +167,10 @@ class TestWorkflowGraph:
             SSEEventType.NODE_START,   # reviewer
             SSEEventType.NODE_COMPLETE,
             SSEEventType.RISK_FOUND,   # 风险逐条上屏 (reviewer 之后)
+            SSEEventType.NODE_START,   # quality_gate
+            SSEEventType.NODE_COMPLETE,
+            SSEEventType.NODE_START,   # obligation
+            SSEEventType.NODE_COMPLETE,
             SSEEventType.NODE_START,   # negotiator
             SSEEventType.NODE_COMPLETE,
             SSEEventType.SUMMARY,
@@ -188,3 +206,50 @@ class TestWorkflowGraph:
         # extractor/retriever 正常推进; reviewer 失败不阻断后续节点
         assert summary.data["total_clauses"] == 2
         assert summary.data["total_risks"] == 0
+
+
+class TestAnalysisTaskBuffer:
+    """后台任务化: 事件缓冲回放 + 断线后任务不受影响."""
+
+    def test_replays_buffered_events_after_completion(self, monkeypatch) -> None:
+        import asyncio
+
+        from app.services import analysis_task as at
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, _model, _pk):
+                return None
+
+            async def commit(self):
+                pass
+
+        async def fake_run(contract_id, raw_text, session=None):  # noqa: ARG001
+            yield SSEEvent(event=SSEEventType.NODE_COMPLETE, data={"node_name": "extractor"})
+            await asyncio.sleep(0.05)
+            yield SSEEvent(event=SSEEventType.COMPLETE, data={"message": "ok"})
+
+        monkeypatch.setattr(at, "async_session_factory", _FakeSession)
+        monkeypatch.setattr(at, "run_contract_analysis", fake_run)
+
+        async def scenario():
+            at.start_analysis("buf-1", "text")
+            first = [e async for e in at.stream_events("buf-1")]
+            # 任务已结束: 重连仍可完整回放 (SSE 断线场景)
+            second = [e async for e in at.stream_events("buf-1")]
+            return first, second
+
+        try:
+            first, second = asyncio.run(scenario())
+            assert [e.event for e in first] == [
+                SSEEventType.NODE_COMPLETE,
+                SSEEventType.COMPLETE,
+            ]
+            assert [e.event for e in second] == [e.event for e in first]
+        finally:
+            at._sessions.pop("buf-1", None)

@@ -27,6 +27,8 @@ def get_chat_llm(temperature: float | None = None) -> ChatOpenAI:
         temperature=temperature if temperature is not None else 0.1,
         max_tokens=4096,
         streaming=True,
+        request_timeout=120,
+        max_retries=1,
     )
 
 
@@ -44,4 +46,6 @@ def get_vision_llm(temperature: float = 0.0) -> ChatOpenAI:
         temperature=temperature,
         max_tokens=4096,
         streaming=False,
+        request_timeout=120,
+        max_retries=1,
     )
