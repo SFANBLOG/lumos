@@ -44,6 +44,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"🗄️ 数据库: {settings.database_url[:50]}...")
     logger.info(f"🤖 LLM: {settings.llm_model_name} @ {settings.llm_base_url[:40]}")
     logger.info(f"🔐 鉴权: {'已启用' if settings.auth_enabled else '未启用'}")
+    # 临时诊断: 平台挂载的加密配置可能落在多个路径, 确认哪一个被 pydantic-settings 读到
+    from pathlib import Path as _P
+
+    _cands = ["/app/.env", "/app/backend/.env", "/backend/.env", "/.env"]
+    logger.info(
+        "🧪 env 候选: "
+        + ", ".join(f"{p}={'Y' if _P(p).exists() else 'N'}" for p in _cands)
+        + f" | llm_key={'Y' if settings.llm_api_key else 'N'}"
+    )
     logger.info("=" * 60)
 
     # 初始化数据库 (MySQL 不可用时仅告警并继续启动, 关系型功能将降级)
