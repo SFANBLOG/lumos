@@ -11,8 +11,9 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from sqlalchemy import Column
-from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, SQLModel
+
+from app.models.long_text import LongText
 
 
 class ContractSource(str, Enum):
@@ -50,7 +51,7 @@ class Contract(SQLModel, table=True):
     raw_text: str = Field(
         sa_column=Column(
             "raw_text",
-            MEDIUMTEXT(),
+            LongText(),
             nullable=False,
         ),
         description="OCR/上传后的原始文本（已脱敏）",

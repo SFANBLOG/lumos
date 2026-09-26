@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
@@ -17,9 +17,18 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+
+def _async_url(url):
+    """托管平台注入的 postgresql:// 为同步驱动, 改写为 asyncpg 异步驱动."""
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "postgresql" and not parsed.drivername.endswith("+asyncpg"):
+        parsed = parsed.set(drivername="postgresql+asyncpg")
+    return parsed
+
+
 # 异步引擎
 engine = create_async_engine(
-    settings.database_url,
+    _async_url(settings.database_url),
     echo=settings.database_echo,
     future=True,
     pool_pre_ping=True,

@@ -10,10 +10,11 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import Column
-from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, SQLModel
 
-MEDIUM_TEXT = MEDIUMTEXT()
+from app.models.long_text import LongText
+
+MEDIUM_TEXT = LongText()
 
 
 class ConsultSession(SQLModel, table=True):
