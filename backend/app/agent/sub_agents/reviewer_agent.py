@@ -1,7 +1,9 @@
 """
 Reviewer Agent — 风险审查子智能体.
 
-综合条款和法规进行逐项风险评估和整体打分。
+综合条款和法规进行逐项风险评估和整体打分; 审查完成后在节点内联执行
+证据质检 (原独立 quality_gate 节点并入): 核验原文定位与法律依据,
+产出置信度与待人工复核清单。
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ class ReviewerAgent(BaseAgent):
     """风险审查子智能体."""
 
     name = "reviewer"
-    description = "🔍 风险审查 — 正在逐项评估风险…"
+    description = "🔍 风险审查 — 正在评估风险并核验依据…"
     system_prompt = REVIEWER_SYSTEM_PROMPT
     skills = ["risk_scoring"]
 
@@ -104,6 +106,7 @@ class ReviewerAgent(BaseAgent):
             logger.error(f"  LLM 审查失败: {e}，降级为规则审查")
             self._fallback(state)
 
+        self._apply_quality_gate(state)
         return state
 
     @staticmethod
@@ -142,3 +145,20 @@ class ReviewerAgent(BaseAgent):
             f"⚠️ AI 深度分析暂不可用，已使用规则引擎完成初步审查。"
             f"共发现 {len(assessments)} 项需关注条款。"
         )
+
+    @staticmethod
+    def _apply_quality_gate(state: AgentState) -> None:
+        """证据质检 (原独立 quality_gate 节点并入本节点).
+
+        阻止缺少原文或法律依据的风险结论直接被信任: 逐条核验
+        ``original_clause`` 能否定位到合同原文、``legal_basis`` 是否为空,
+        汇总待人工复核清单并折算证据完整性置信度。
+        """
+        issues: list[str] = []
+        for risk in state.risk_assessments:
+            if not risk.original_clause or risk.original_clause not in state.raw_text:
+                issues.append(f"{risk.title}: 原文定位待人工复核")
+            if not risk.legal_basis.strip():
+                issues.append(f"{risk.title}: 缺少法律依据")
+        state.quality_issues = issues
+        state.confidence_score = max(0, 100 - min(60, len(issues) * 15))

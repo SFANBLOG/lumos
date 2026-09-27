@@ -84,7 +84,7 @@ class AgentState(BaseModel):
         description="检索到的相关法条",
     )
 
-    # ── Node C: 风险审查 ──
+    # ── Node C: 风险审查 (含证据质检) ──
     risk_assessments: list[RiskAssessment] = Field(
         default_factory=list,
         description="逐项风险评估结果",
@@ -97,6 +97,8 @@ class AgentState(BaseModel):
     summary: str = Field(default="", description="一句话总结")
     confidence_score: int = Field(default=100, ge=0, le=100, description="证据完整性置信度")
     quality_issues: list[str] = Field(default_factory=list, description="待人工复核项")
+
+    # ── Node D: 义务提取与谈判话术 ──
     contract_facts: dict = Field(default_factory=dict, description="合同运营要素与义务")
 
     # ── 流程控制 ──

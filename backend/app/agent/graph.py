@@ -3,12 +3,14 @@ LangGraph 合同审查工作流.
 
 以 LangGraph ``StateGraph`` 编排 4 个阶段节点:
 
-    extract → retrieve → review → negotiate
+    extractor → retriever → reviewer → negotiator
 
-节点间共享 pydantic ``AgentState``; 每个节点包装一个子智能体执行,
-节点内产生的事件 (THINKING / NODE_COMPLETE / RISK_FOUND) 按序累积进
-``state.events``, 由 ``run_contract_analysis`` 沿 SSE 协议回放;
-NODE_START 事件由 runner 按线性图顺序预推, 保持原有 SSE 时间线语义。
+其中证据质检 (quality_gate) 内联在 reviewer 节点内执行, 合同义务提取
+(obligation) 内联在 negotiator 节点内执行; 节点间共享 pydantic
+``AgentState``; 每个节点包装一个子智能体执行, 节点内产生的事件
+(THINKING / NODE_COMPLETE / RISK_FOUND) 按序累积进 ``state.events``,
+由 ``run_contract_analysis`` 沿 SSE 协议回放; NODE_START 事件由
+runner 按线性图顺序预推, 保持原有 SSE 时间线语义。
 
 对外保持 ``run_contract_analysis`` 接口不变 (供 SSE 流式调用)。
 """
@@ -29,8 +31,6 @@ from app.agent.sub_agents.extractor_agent import ExtractorAgent
 from app.agent.sub_agents.negotiator_agent import NegotiatorAgent
 from app.agent.sub_agents.retriever_agent import RetrieverAgent
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
-from app.agent.sub_agents.quality_gate_agent import QualityGateAgent
-from app.agent.sub_agents.obligation_agent import ObligationAgent
 from app.models.analysis import AnalysisResult, RiskItem
 from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 
@@ -38,10 +38,8 @@ from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 _NODE_SEQ: list[tuple[str, str]] = [
     ("extractor", "📝 结构化抽取 — 正在整理合同条款…"),
     ("retriever", "⚖️ 法规检索 — 正在查询相关劳动法条文…"),
-    ("reviewer", "🔍 风险审查 — 正在逐项评估风险…"),
-    ("quality_gate", "✅ 证据质检 — 正在核验风险依据…"),
-    ("obligation", "📅 合同运营 — 正在提取期限与义务…"),
-    ("negotiator", "🗣️ 谈判策略 — 正在生成沟通话术…"),
+    ("reviewer", "🔍 风险审查 — 正在评估风险并核验依据…"),
+    ("negotiator", "🗣️ 运营与谈判 — 正在整理义务并生成话术…"),
 ]
 
 _AGENTS: dict[str, BaseAgent] = {
@@ -50,8 +48,6 @@ _AGENTS: dict[str, BaseAgent] = {
         ExtractorAgent(),
         RetrieverAgent(),
         ReviewerAgent(),
-        QualityGateAgent(),
-        ObligationAgent(),
         NegotiatorAgent(),
     ]
 }
