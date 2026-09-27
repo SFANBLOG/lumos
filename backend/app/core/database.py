@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
@@ -17,9 +17,31 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+
+#: asyncpg 仅接受下列连接参数 (PocketBay 注入串常带 sslmode 等 libpq 风格参数)
+_ASYNCPG_KEEP = {"ssl", "sslcert", "sslkey", "sslrootcert", "sslpassword"}
+
+
+def _async_url(url):
+    """托管平台注入的 postgresql:// 为同步驱动, 改写为 asyncpg 异步驱动.
+
+    asyncpg 的 connect() 不接受 libpq 风格参数 (如 sslmode), 未知参数会直接
+    TypeError, 因此对查询串做映射 (sslmode→ssl) 并丢弃其余未知键。
+    """
+    parsed = make_url(url)
+    if parsed.get_backend_name() != "postgresql":
+        return parsed
+    query = dict(parsed.query)
+    if "sslmode" in query:
+        query.setdefault("ssl", query["sslmode"])
+        del query["sslmode"]
+    query = {k: v for k, v in query.items() if k in _ASYNCPG_KEEP}
+    return parsed.set(drivername="postgresql+asyncpg", query=query)
+
+
 # 异步引擎
 engine = create_async_engine(
-    settings.database_url,
+    _async_url(settings.database_url),
     echo=settings.database_echo,
     future=True,
     pool_pre_ping=True,

@@ -374,7 +374,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **27 条 pytest 用例**（默认跑 25 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（见 `backend/tests/`）；
+- 当前 **31 条 pytest 用例**（默认跑 29 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（见 `backend/tests/`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -394,7 +394,7 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 
 如实解读：榜首精度（hit@1 / MRR@5）纯向量最好、融合次之、BM25 最后——29 条小语料下 BM25 噪音会拉低融合榜首；但 **RRF 融合的广度优势在 hit@3 / hit@5 上显著**：0.789 / **0.878**，均超过纯向量（0.656 / 0.833）。调优 `rrf_k` 是后续方向（重新运行本命令即可复现最新数字）。
 
-> **注**：上表为 2026-09-09 在 29 条小语料上的历史基线。此后语料已扩充至 **14 部现行劳动法律法规完整条文（659 条，全部取自政府官网公开文本）**，向量索引按内容哈希自动重建；上表数字待重跑评测后更新。
+> **注**：上表为 2026-09-09 在 29 条小语料上的历史基线。此后语料已扩充至 **18 部现行劳动法规、670 条条文**（14 部完整条文 JSON 位于 `backend/app/rag/data/`，另并入民法典 / 个人信息保护法 / 医疗期 / 劳务派遣等扩展条文，见 `app/rag/law_corpus_ext.py`），向量索引按内容哈希自动重建；上表数字待重跑评测后更新。
 
 ### 8.3 量化口径边界
 
@@ -524,7 +524,7 @@ lumos/
 │   │   └── skills/                    # 可复用技能
 │   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
 │   │   └── retrieval_eval.py
-│   ├── tests/                         # 27 条 pytest 用例（25 默认 + 2 e2e marker）
+│   ├── tests/                         # 31 条 pytest 用例（29 默认 + 2 e2e marker）
 │   ├── models/                        # 本地 embedding 权重（bge-base-zh-v1.5，已 gitignore）
 │   ├── logs/                          # 运行日志（每日轮转/保留 30 天，已 gitignore）
 │   ├── pyproject.toml

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -19,12 +18,12 @@ from loguru import logger
 from sqlalchemy import func
 from sqlmodel import select
 
-from app.agent.graph import run_contract_analysis
 from app.api.deps import AuthAny, DBSession
 from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
+from app.services import analysis_task
 from app.services.audit import record_audit_event
-from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse, SSEEventType
+from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse
 from app.schemas.contract import (
     ContractCreateRequest,
     ContractListResponse,
@@ -183,7 +182,7 @@ async def submit_contract(
     )
 
     session.add(contract)
-    await session.flush()  # 获取 ID, 但不提交事务 (由 get_session 管理)
+    await session.flush()  # 获取 ID
     await record_audit_event(
         session,
         action="contract.submitted",
@@ -193,6 +192,10 @@ async def submit_contract(
         ip_address=http_request.client.host if http_request.client else None,
         details={"source": request.source.value, "char_count": len(request.text)},
     )
+    # 先提交落库, 再启动后台任务 (任务使用独立会话, 必须能读到该记录)
+    await session.commit()
+
+    analysis_task.start_analysis(contract.id, request.text)
 
     logger.info(f"✅ 合同记录已创建 | ID: {contract.id}")
 
@@ -217,7 +220,7 @@ async def stream_analysis(
     session: DBSession,
     _auth: AuthAny,
 ) -> StreamingResponse:
-    """SSE 流式推送合同分析进度."""
+    """SSE 流式推送合同分析进度 (回放后台任务缓冲, 断线可重连)."""
     # 查找合同
     contract = await session.get(Contract, contract_id)
     if not contract:
@@ -226,61 +229,34 @@ async def stream_analysis(
             detail=f"合同 {contract_id} 不存在",
         )
 
+    raw_text = contract.raw_text
+    status_now = contract.status
+
     async def event_generator():
         """生成 SSE 事件流."""
-        try:
-            async for event in run_contract_analysis(
-                contract_id=contract_id,
-                raw_text=contract.raw_text,
-                session=session,
-            ):
-                # 在推送 complete 前先落库: 客户端收到后可能立即断开,
-                # 若之后再提交状态, 生成器会被取消导致状态永远停留在 analyzing
-                if event.event == SSEEventType.COMPLETE:
-                    contract.status = ContractStatus.COMPLETED
-                    contract.updated_at = datetime.now(UTC)
-                    session.add(contract)
-                    await session.commit()
-
-                # 格式化为 SSE 协议
-                data = json.dumps(event.data, ensure_ascii=False)
-                yield f"event: {event.event.value}\ndata: {data}\n\n"
-
-                # 给前端一点渲染时间
-                await asyncio.sleep(0.1)
-
-        except asyncio.CancelledError:
-            # 客户端提前断开 (如中途离开分析页): 数据已持久化则视为完成, 否则标记失败
-            logger.warning(f"SSE 连接中断 | 合同ID: {contract_id}")
-            try:
-                persisted = (
-                    await session.execute(
-                        select(AnalysisResult).where(AnalysisResult.contract_id == contract_id)
-                    )
-                ).scalar_one_or_none()
-                contract.status = (
-                    ContractStatus.COMPLETED if persisted else ContractStatus.FAILED
+        if not analysis_task.has_session(contract_id):
+            # 无内存会话 (进程重启 / 缓冲已淘汰): 按 DB 状态补救
+            if status_now == ContractStatus.ANALYZING:
+                analysis_task.start_analysis(contract_id, raw_text)
+            elif status_now == ContractStatus.COMPLETED:
+                data = json.dumps({"message": "✨ 该合同已完成分析"}, ensure_ascii=False)
+                yield f"event: complete\ndata: {data}\n\n"
+                return
+            else:
+                data = json.dumps(
+                    {"message": f"分析已结束, 当前状态: {status_now.value}, 请重新提交"},
+                    ensure_ascii=False,
                 )
-                contract.updated_at = datetime.now(UTC)
-                session.add(contract)
-                await session.commit()
-            except Exception:
-                logger.exception("SSE 连接中断后状态更新失败")
-            raise
+                yield f"event: error\ndata: {data}\n\n"
+                return
 
-        except Exception as e:
-            logger.exception(f"SSE 流异常 | 合同ID: {contract_id}")
-            error_data = json.dumps(
-                {"message": f"分析失败: {e}"},
-                ensure_ascii=False,
-            )
-            yield f"event: error\ndata: {error_data}\n\n"
+        async for event in analysis_task.stream_events(contract_id):
+            # 格式化为 SSE 协议
+            data = json.dumps(event.data, ensure_ascii=False)
+            yield f"event: {event.event.value}\ndata: {data}\n\n"
 
-            # 标记失败
-            contract.status = ContractStatus.FAILED
-            contract.updated_at = datetime.now(UTC)
-            session.add(contract)
-            await session.commit()
+            # 给前端一点渲染时间
+            await asyncio.sleep(0.1)
 
     return StreamingResponse(
         event_generator(),

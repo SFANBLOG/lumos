@@ -56,11 +56,12 @@ RUN uv pip install --system --no-cache .
 # ========================================
 FROM python:3.11-slim AS runtime
 
-# 系统依赖: Tesseract OCR (中文), nginx, supervisor
+# 系统依赖: Tesseract OCR (中文), nginx, supervisor, gettext-base (envsubst)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
+        gettext-base \
         tesseract-ocr \
         tesseract-ocr-chi-sim \
         curl \

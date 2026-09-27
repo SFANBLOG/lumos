@@ -6,8 +6,9 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import Column
-from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, SQLModel
+
+from app.models.long_text import LongText
 
 
 class AuditEvent(SQLModel, table=True):
@@ -21,5 +22,5 @@ class AuditEvent(SQLModel, table=True):
     actor_id: str | None = Field(default=None, index=True, max_length=64)
     request_id: str | None = Field(default=None, index=True, max_length=64)
     ip_address: str | None = Field(default=None, max_length=64)
-    details_json: str = Field(default="{}", sa_column=Column(MEDIUMTEXT(), nullable=False))
+    details_json: str = Field(default="{}", sa_column=Column(LongText(), nullable=False))
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), index=True)

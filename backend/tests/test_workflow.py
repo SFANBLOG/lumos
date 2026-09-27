@@ -188,3 +188,50 @@ class TestWorkflowGraph:
         # extractor/retriever 正常推进; reviewer 失败不阻断后续节点
         assert summary.data["total_clauses"] == 2
         assert summary.data["total_risks"] == 0
+
+
+class TestAnalysisTaskBuffer:
+    """后台任务化: 事件缓冲回放 + 断线后任务不受影响."""
+
+    def test_replays_buffered_events_after_completion(self, monkeypatch) -> None:
+        import asyncio
+
+        from app.services import analysis_task as at
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, _model, _pk):
+                return None
+
+            async def commit(self):
+                pass
+
+        async def fake_run(contract_id, raw_text, session=None):  # noqa: ARG001
+            yield SSEEvent(event=SSEEventType.NODE_COMPLETE, data={"node_name": "extractor"})
+            await asyncio.sleep(0.05)
+            yield SSEEvent(event=SSEEventType.COMPLETE, data={"message": "ok"})
+
+        monkeypatch.setattr(at, "async_session_factory", _FakeSession)
+        monkeypatch.setattr(at, "run_contract_analysis", fake_run)
+
+        async def scenario():
+            at.start_analysis("buf-1", "text")
+            first = [e async for e in at.stream_events("buf-1")]
+            # 任务已结束: 重连仍可完整回放 (SSE 断线场景)
+            second = [e async for e in at.stream_events("buf-1")]
+            return first, second
+
+        try:
+            first, second = asyncio.run(scenario())
+            assert [e.event for e in first] == [
+                SSEEventType.NODE_COMPLETE,
+                SSEEventType.COMPLETE,
+            ]
+            assert [e.event for e in second] == [e.event for e in first]
+        finally:
+            at._sessions.pop("buf-1", None)

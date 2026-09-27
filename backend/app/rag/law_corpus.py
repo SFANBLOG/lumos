@@ -16,6 +16,9 @@
 - category: 关联的风险分类
 - source: 政府公开文本来源
 
+扩展条文 (民法典 / 个人信息保护法 / 医疗期 / 劳务派遣等)
+见 ``app.rag.law_corpus_ext``，与本模块合并后构成完整语料。
+
 数据来源: gov.cn / npc.gov.cn / court.gov.cn / mohrss.gov.cn 公开现行文本。
 本模块内保留各法核心条文列表，仅在 JSON 文件缺失时降级使用。
 """
@@ -25,6 +28,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+
+from app.rag.law_corpus_ext import EXTENDED_RULES
 
 
 # ── 《中华人民共和国劳动合同法》(2012修正) ────────────────────
@@ -318,7 +323,7 @@ _FALLBACK_LAWS: list[list[dict]] = [
 
 
 def _load_full_corpus() -> list[dict]:
-    """加载 data/ 下全部完整条文; 文件缺失的法律回退到内置核心条款."""
+    """加载 data/ 下全部完整条文; 文件缺失的法律回退到内置核心条款; 并入扩展条文."""
     data_dir = Path(__file__).with_name("data")
     laws: list[dict] = []
     loaded_names: set[str] = set()
@@ -335,6 +340,8 @@ def _load_full_corpus() -> list[dict]:
         for row in fallback:
             if row["law_name"] not in loaded_names:
                 laws.append(row)
+    # 扩展条文 (民法典/个人信息保护法/医疗期/劳务派遣等); 与完整条文重复的条目在下方统一去重
+    laws.extend(EXTENDED_RULES)
     # 按 (law_name, article) 去重, 保留首次出现
     seen: set[tuple[str, str]] = set()
     unique: list[dict] = []

@@ -11,11 +11,12 @@ from datetime import UTC, datetime
 from enum import Enum
 
 from sqlalchemy import Column
-from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlmodel import Field, Relationship, SQLModel
 
-# 长文本列统一用 MEDIUMTEXT (MySQL), 避免 str 默认 VARCHAR(255) 截断
-MEDIUM_TEXT = MEDIUMTEXT()
+from app.models.long_text import LongText
+
+# 长文本列统一用 LongText (MySQL=MEDIUMTEXT / 其他方言=TEXT), 避免 str 默认 VARCHAR(255) 截断
+MEDIUM_TEXT = LongText()
 
 
 class RiskLevel(str, Enum):
