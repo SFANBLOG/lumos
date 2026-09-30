@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     """应用核心配置, 一切可配项均在此定义."""
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
+        # 本地读 backend/.env; PocketBay 把批准的配置挂载到 backend/.env (容器内即 /app/backend/.env)
+        env_file=(str(BASE_DIR / ".env"), str(BASE_DIR / "backend" / ".env")),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
