@@ -1,12 +1,14 @@
 """
 向量库管理 + 混合检索入口.
 
-检索链路 (search_laws):
-    1. 向量通道: Milvus (真实 embedding, COSINE);
-    2. 关键词通道: BM25 全文检索 (jieba 分词, 内存索引);
-    3. 两通道结果经 Reciprocal Rank Fusion (RRF) 融合排序;
-    4. 相关度分数 (similarity) 由两通道真实分数加权得出
-       (向量权重见 hybrid_vector_weight 配置), 单通道命中打折。
+检索链路 (search_laws) — 双路召回 + RRF 融合 + 精排:
+    1. 双路召回: 向量通道 Milvus (真实 embedding, COSINE)
+       + 关键词通道 BM25 全文检索 (jieba 分词, 内存索引);
+    2. RRF 融合: 两通道结果经 Reciprocal Rank Fusion (RRF) 融合排序,
+       相关度分数 (similarity) 由两通道真实分数加权得出
+       (向量权重见 hybrid_vector_weight 配置), 单通道命中打折;
+    3. 精排: 融合候选经 rerank_candidates 重排 (轻量可解释精排 /
+       可选 CrossEncoder 语义重排), 并按 retrieval_min_similarity 阈值过滤。
 
 向量通道唯一后端为 Milvus (非 sqlite, 无 ChromaDB 降级路径);
 Milvus 不可用时向量通道直接关闭, 仅保留 BM25 关键词检索, 应用仍可启动。
@@ -69,9 +71,10 @@ def search_laws(
     n_results: int = 5,
     category: str | None = None,
 ) -> list[dict]:
-    """
-    混合检索: 向量通道 (Milvus) + BM25 通道 → RRF 融合.
+    """混合检索: 双路召回 (向量 Milvus + BM25) → RRF 融合 → 精排 (Reranker).
 
+    候选池按 top_k × max(hybrid_top_k_ratio, reranker_candidate_multiplier)
+    放大, 先经 RRF 融合再交由 rerank_candidates 精排取前 n_results。
     任一通道不可用时自动降级 (仅剩单通道也能工作); 两通道全部
     不可用时返回空列表并记录错误, 不抛出异常。
     """

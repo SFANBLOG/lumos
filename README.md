@@ -49,7 +49,7 @@
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
 | **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
-| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = Milvus 向量 + BM25（jieba 分词）双通道 → **RRF 融合**，答案可溯源到具体法条 |
+| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = **双路召回**（Milvus 向量 + BM25 jieba 分词）→ **RRF 融合** → **精排**（Reranker 重排 + 相似度阈值过滤），答案可溯源到具体法条 |
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
 | **MCP 协议支持** | 内置 MCP Server，将法条检索、条款分析、风险评分、谈判话术等能力标准化暴露，方便二次开发与外部 Agent 集成 |
@@ -103,6 +103,7 @@
 | 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
 | Milvus | 向量数据库（COSINE，动态维度）；不可用时向量通道自动关闭，仅保留 BM25 关键词检索 |
 | BM25 (jieba) | 法条语料全文关键词通道（零分未命中文档不进候选），与向量通道经 **RRF** 融合；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折） |
+| Reranker（精排） | RRF 融合候选再经 `rerank_candidates` 精排：默认轻量可解释精排（召回分 + 词覆盖 + 标题命中加权），可选 CrossEncoder（`BAAI/bge-reranker-base`）语义重排，并按相似度阈值过滤后取 Top-K |
 | MinIO | 对象存储，合同文件与扫描件上传 |
 
 ---
@@ -142,8 +143,10 @@ flowchart TB
         V1["Milvus 向量通道<br/>COSINE · 签名隔离集合"]
         B1["BM25 关键词通道<br/>jieba + 法律领域词典"]
         F1["RRF 融合<br/>k = 60"]
+        R1["精排 Reranker<br/>可解释 / CrossEncoder"]
         E1 --> V1 --> F1
         B1 --> F1
+        F1 --> R1
     end
 
     subgraph L5["⑤ 存储与协议"]
@@ -155,7 +158,7 @@ flowchart TB
 
     L1 --> L2 --> L3
     N2 --> L4
-    F1 --> N3
+    R1 --> N3
     L3 --> L5
 ```
 
@@ -181,7 +184,7 @@ sequenceDiagram
     G-->>U: NODE_COMPLETE extractor
 
     G-->>U: NODE_START retriever
-    G->>R: search_laws 混合召回（向量 + BM25 → RRF）
+    G->>R: search_laws 混合检索（双路召回 + RRF → 精排）
     R-->>G: Top-K 法条（可溯源到具体条文）
     G-->>U: NODE_COMPLETE retriever
 
@@ -226,7 +229,7 @@ StateGraph(AgentState)
 | 节点 / 子智能体 | key | 擅长场景 |
 |---|---|---|
 | ExtractorAgent | `extractor` | 合同文本清洗、OCR 纠错、条款结构化拆分 |
-| RetrieverAgent | `retriever` | 劳动法条文混合检索（向量 + BM25 + RRF）、RAG 召回 |
+| RetrieverAgent | `retriever` | 劳动法条文混合检索（双路召回 + RRF 融合 + 精排）、RAG 召回 |
 | ReviewerAgent | `reviewer` | 风险多维度打分、法律依据生成、谈判话术 |
 | NegotiatorAgent | `negotiator` | 补充谈判话术，确保每条风险都有应对策略 |
 
@@ -254,7 +257,7 @@ StateGraph(AgentState)
 
 | 工具 | 说明 | 数据来源 |
 |---|---|---|
-| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：向量（Milvus）+ BM25 → RRF |
+| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：双路召回（向量 Milvus + BM25）→ RRF → 精排 |
 | `risk_assess` | 对结构化条款进行风险评分与法律依据匹配 | ReviewerAgent 内部逻辑 |
 | `clause_analyze` | 对单一条款进行深度分析 | LLM + 法条上下文 |
 | `negotiation` | 为风险条款生成可执行谈判话术 | LLM 生成 |
@@ -431,6 +434,11 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `RRF_K` | `60` | RRF 融合参数：score = Σ 1/(k + rank) |
 | | `HYBRID_VECTOR_WEIGHT` | `0.65` | 相关度分数中向量通道权重（BM25 权重 = 1 − 该值） |
 | | `HYBRID_SINGLE_CHANNEL_FACTOR` | `0.85` | 仅单通道命中时的相关度折扣（0~1） |
+| 精排 | `RERANKER_ENABLED` | `false` | 是否启用 CrossEncoder 语义精排（关闭时回退轻量可解释精排） |
+| | `RERANKER_MODEL_NAME` | `BAAI/bge-reranker-base` | CrossEncoder 精排模型 |
+| | `RERANKER_CANDIDATE_MULTIPLIER` | `3` | 精排前候选池 = top_k × 该值（与 `HYBRID_TOP_K_RATIO` 取大） |
+| | `RERANKER_MAX_LENGTH` | `512` | CrossEncoder 单条输入最大长度 |
+| | `RETRIEVAL_MIN_SIMILARITY` | `0.05` | 精排后 `final_score` 低于该阈值的命中被过滤 |
 | 视觉 OCR | `LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL` / `LLM_VISION_MODEL_NAME` | qwen-vl / DashScope | 图片文字抽取（未配置时回退 Tesseract） |
 | | `IMAGE_OCR_STRATEGY` | `auto` | `auto` \| `llm` \| `tesseract` |
 | 安全 | `API_SECRET_KEY` | （空，置空关闭鉴权） | 业务鉴权密钥 |
@@ -508,12 +516,13 @@ lumos/
 │   │   │   ├── base.py                # 子智能体抽象基类 BaseAgent
 │   │   │   ├── llm.py                 # LLM 客户端工厂（ChatOpenAI / Vision）
 │   │   │   └── sub_agents/            # Extractor/Retriever/Reviewer/Negotiator/Consultant
-│   │   ├── rag/                       # 混合检索（真实 embedding + Milvus + BM25 + RRF）
+│   │   ├── rag/                       # 混合检索（真实 embedding + 双路召回 + RRF + 精排）
 │   │   │   ├── embeddings.py          # 双 Provider embedding（local / API），签名隔离
 │   │   │   ├── milvus_store.py        # Milvus 集合管理 + 检索（COSINE/动态维度）
-│   │   │   ├── vector_store.py        # 混合检索入口 search_laws（向量 + BM25 → RRF）
+│   │   │   ├── vector_store.py        # 混合检索入口 search_laws（双路召回 → RRF → 精排）
 │   │   │   ├── bm25_index.py          # BM25 全文检索（jieba 分词 + 法律领域词典）
 │   │   │   ├── hybrid.py              # RRF 融合（Reciprocal Rank Fusion）
+│   │   │   ├── reranker.py             # 精排（可解释 / CrossEncoder）+ 阈值过滤
 │   │   │   └── law_corpus.py          # 劳动法规条文语料（内容哈希）
 │   │   ├── api/v1/                    # FastAPI 路由
 │   │   ├── core/                      # 配置、数据库、安全、MinIO

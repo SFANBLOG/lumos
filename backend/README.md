@@ -3,13 +3,13 @@
 契光鉴微 —— AI 合同风险排查引擎后端（FastAPI）。
 
 基于 **LangGraph 状态图**编排 4 阶段子智能体流水线（抽取 → 法规检索 → 风险审查 → 谈判策略），
-法规检索采用 **真实 embedding + Milvus 向量 + BM25 关键词 + RRF 融合** 的混合检索链路。
+法规检索采用 **双路召回（Milvus 向量 + BM25 关键词）→ RRF 融合 → 精排（Reranker）** 的三段式混合检索链路（基于真实 embedding）。
 
 ```mermaid
 flowchart LR
     API["FastAPI<br/>REST + SSE"] --> G["LangGraph StateGraph<br/>共享 AgentState"]
     G --> N1["1 Extractor"] --> N2["2 Retriever"] --> N3["3 Reviewer"] --> N4["4 Negotiator"]
-    N2 --> RAG["Hybrid RAG<br/>Milvus 向量 + BM25 → RRF"]
+    N2 --> RAG["Hybrid RAG<br/>双路召回 + RRF → 精排"]
     G --> DB["MySQL 8<br/>SQLModel"]
     API --> MCP["MCP Server<br/>4 工具"]
 ```
@@ -25,6 +25,7 @@ flowchart LR
   - 向量库：Milvus（COSINE；集合名 = 基名 + embedding 签名哈希，换模型自动隔离重建；不可用时向量通道关闭，仅剩 BM25）
   - 关键词通道：BM25（rank-bm25 + jieba 中文分词，领域词典）
   - 融合：Reciprocal Rank Fusion（RRF），生产入口 `search_laws()`
+  - 精排：Reranker（默认轻量可解释精排，可选 CrossEncoder `BAAI/bge-reranker-base` 语义重排 + 相似度阈值过滤），由 `search_laws()` 在 RRF 融合后内联调用
 - **协议开放**：MCP Server + Client（JSON-RPC 2.0 over HTTP，4 个工具）
 - **其他**：SQLModel + aiomysql（MySQL 8）、MinIO 对象存储、JWT + API-Key 认证、loguru
 
@@ -62,13 +63,14 @@ backend/
 │   │   ├── llm.py          # ChatOpenAI 工厂
 │   │   └── sub_agents/     # extractor/retriever/reviewer/negotiator/consultant
 │   ├── api/v1/             # REST/SSE 路由 (19 个端点)
-│   ├── rag/                # 混合检索链路
+│   ├── rag/                # 混合检索链路（双路召回 + RRF + 精排）
 │   │   ├── law_corpus.py   # 法条语料 (14 部法律法规完整条文) + 语料哈希
 │   │   ├── embeddings.py   # 真实 embedding 双通道 (local/api)
 │   │   ├── bm25_index.py   # BM25 关键词通道 (jieba + 领域词典)
 │   │   ├── milvus_store.py # Milvus 向量库 (COSINE/签名集合隔离)
-│   │   ├── vector_store.py # 向量通道 + search_laws 混合检索入口
-│   │   └── hybrid.py       # RRF 融合
+│   │   ├── vector_store.py # search_laws 混合入口（双路召回 → RRF → 精排）
+│   │   ├── hybrid.py       # RRF 融合
+│   │   └── reranker.py     # 精排（可解释 / CrossEncoder）
 │   ├── mcp/                # MCP 协议 (server/client/tools)
 │   ├── models/ schemas/ services/ skills/ core/ middleware/
 ├── eval/                    # 离线评测工具
@@ -126,6 +128,7 @@ python -m eval.retrieval_eval --topk 5
 | `EMBEDDING_PROVIDER` | `local` | `local`(sentence-transformers) \| `api` |
 | `EMBEDDING_MODEL_NAME` | `BAAI/bge-base-zh-v1.5` | 本地模型名（预下载到 `models/bge-base-zh-v1.5/`；未命中时经 hf-mirror 自动拉取） |
 | `HYBRID_TOP_K_RATIO` / `RRF_K` | `2` / `60` | 混合检索融合参数 |
+| `RERANKER_ENABLED` / `RERANKER_MODEL_NAME` | `false` / `BAAI/bge-reranker-base` | 精排：开启则用 CrossEncoder 语义重排，否则可解释精排 |
 | `MILVUS_HOST` / `MILVUS_PORT` | localhost / 19530 | 向量库 |
 | `DATABASE_URL` | mysql+aiomysql://... | SQLAlchemy 连接串（**不再支持 SQLite**，Docker 由 compose 注入） |
 | `DATABASE_ECHO` | `false` | 回显执行 SQL（调试用，默认关闭） |

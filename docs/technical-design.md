@@ -148,7 +148,7 @@ lumos/
 | LangGraph / PydanticAI 二选一 | **LangGraph 1.x 真 StateGraph** | `app/agent/graph.py`：extract → retrieve → review → negotiate 四节点线性链，节点共享 Pydantic `AgentState`（含 `events` 事件通道），`graph.astream` 增量回放事件；节点错误转 `THINKING` 警告并继续，全图失败才发 `ERROR` |
 | 自研编排器 | 已废弃 | 早期 `supervisor.py` 手动 for 循环编排已删除，全部迁移至 LangGraph |
 | SQLModel（SQLite/PG） | **SQLModel + aiomysql，MySQL 8** | Docker Compose 编排，宿主端口 3308 |
-| 纯向量语义检索 | **向量 + BM25 混合检索（RRF 融合）** | `app/rag/`：向量通道（Milvus，不可用时直接关闭、仅剩 BM25）+ BM25 通道（jieba 分词 + 法律领域词典，零分未命中文档不进候选）→ `hybrid.py` RRF（k=60）融合排序；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折），任一通道失败自动降级单通道 |
+| 纯向量语义检索 | **双路召回 + RRF 融合 + 精排（混合检索）** | `app/rag/`：双路召回——向量通道（Milvus，不可用时直接关闭、仅剩 BM25）+ BM25 通道（jieba 分词 + 法律领域词典，零分未命中文档不进候选）→ `hybrid.py` RRF（k=60）融合排序（相关度分数 = 向量余弦与 BM25 归一分加权，单通道命中打折）→ `reranker.py` 精排（默认轻量可解释精排，可选 CrossEncoder 语义重排 + 相似度阈值过滤），任一通道失败自动降级单通道 |
 | 向量库索引 | 未定型 | 现为：语料内容哈希 + embedding 签名双重校验，变化即自动重建；Milvus 集合名带签名后缀隔离；向量维度由模型自动探测，度量 COSINE |
 | 文档解析（LlamaIndex） | 未采用 | 实际为轻量自有解析栈：pypdf / python-docx / openpyxl / python-pptx / RTF·HTML 纯标准库，支持 16 种扩展名 |
 | OCR | 未定型 | 多模态视觉 LLM（通义千问 VL）+ Tesseract 本地兜底，`auto/llm/tesseract` 三级策略 |
@@ -167,12 +167,13 @@ backend/
 │   │   ├── state.py         # AgentState
 │   │   ├── base.py / llm.py # 子智能体基类 / LLM 工厂
 │   │   └── sub_agents/      # extractor/retriever/reviewer/negotiator/consultant
-│   ├── rag/                 # 混合检索
+│   ├── rag/                 # 混合检索（双路召回 + RRF + 精排）
 │   │   ├── embeddings.py    # 双 Provider 真实 embedding
 │   │   ├── milvus_store.py  # Milvus（COSINE/动态维度/签名隔离）
-│   │   ├── vector_store.py  # search_laws 混合入口（向量 + BM25 → RRF）
+│   │   ├── vector_store.py  # search_laws 混合入口（双路召回 → RRF → 精排）
 │   │   ├── bm25_index.py    # BM25（jieba + 领域词典）
 │   │   ├── hybrid.py        # RRF 融合
+│   │   ├── reranker.py      # 精排（可解释 / CrossEncoder）
 │   │   └── law_corpus.py    # 法条语料 + 哈希
 │   ├── api/ core/ mcp/ models/ schemas/ services/ skills/
 ├── eval/                    # 检索评测 retrieval_eval.py（hit@k/MRR）
