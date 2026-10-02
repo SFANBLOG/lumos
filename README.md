@@ -45,11 +45,11 @@
 | 能力 | 说明 |
 |---|---|
 | **十大坑点智能检测** | 深度适配中国劳动法，自动扫描竞业禁止、试用期不缴社保、变相扣薪、含糊岗位职责、苛刻离职审批等 **10 类风险条款** |
-| **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取，PDF/Word 同样支持 |
+| **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取；PDF/Word 同样支持，**扫描版/混排版 PDF 逐页自动 OCR**（无文字层的页渲染位图后识别） |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
 | **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
-| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = **双路召回**（Milvus 向量 + BM25 jieba 分词）→ **RRF 融合** → **精排**（Reranker 重排 + 相似度阈值过滤），答案可溯源到具体法条 |
+| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = **双路召回**（Milvus 向量 + BM25 jieba 分词）→ **RRF 融合** → **精排**（Reranker 重排 + 相似度阈值过滤），答案可溯源到具体法条；风险审查节点对 `legal_basis` 抽取「法名+条号」与召回法条逐条溯源核验，命中不了标注待人工复核并扣减置信度 |
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
 | **MCP 协议支持** | 内置 MCP Server，将法条检索、条款分析、风险评分、谈判话术等能力标准化暴露，方便二次开发与外部 Agent 集成 |
@@ -377,7 +377,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **31 条 pytest 用例**（默认跑 29 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（见 `backend/tests/`）；
+- 当前 **36 条 pytest 用例**（默认跑 34 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支（见 `backend/tests/`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -533,7 +533,7 @@ lumos/
 │   │   └── skills/                    # 可复用技能
 │   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
 │   │   └── retrieval_eval.py
-│   ├── tests/                         # 31 条 pytest 用例（29 默认 + 2 e2e marker）
+│   ├── tests/                         # 36 条 pytest 用例（34 默认 + 2 e2e marker）
 │   ├── models/                        # 本地 embedding 权重（bge-base-zh-v1.5，已 gitignore）
 │   ├── logs/                          # 运行日志（每日轮转/保留 30 天，已 gitignore）
 │   ├── pyproject.toml
