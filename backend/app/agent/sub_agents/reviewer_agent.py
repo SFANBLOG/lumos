@@ -9,6 +9,7 @@ Reviewer Agent — 风险审查子智能体.
 from __future__ import annotations
 
 import json
+import re
 
 from loguru import logger
 
@@ -47,6 +48,77 @@ jurisdiction, training_bond
 
 只输出合法的 JSON，不要添加 markdown 代码块标记或任何额外说明。
 """
+
+# ── 法律依据溯源: 正则与数字归一 ──────────────────────────────
+
+# 从自由文本的 legal_basis 中抽取『法名』(《...》) 与『条号』(第X条, 中文/阿拉伯数字)
+_LAW_NAME_RE = re.compile(r"《([^》]{2,20}?)》")
+_ARTICLE_RE = re.compile(r"第([〇○零一二三四五六七八九十百千0-9]{1,8})条")
+
+_CN_DIGITS = {
+    "零": 0, "〇": 0, "○": 0,
+    "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+_CN_UNITS = {"十": 10, "百": 100, "千": 1000}
+
+
+def _cn_numeral_to_int(token: str) -> int | None:
+    """将中文或阿拉伯数字归一为整数 (支持到千位), 无法解析返回 None."""
+    token = re.sub(r"\s+", "", token)
+    if not token:
+        return None
+    if token.isdigit():
+        return int(token)
+    total = 0
+    num = 0
+    for ch in token:
+        if ch in _CN_DIGITS:
+            num = _CN_DIGITS[ch]
+        elif ch in _CN_UNITS:
+            total += (num if num else 1) * _CN_UNITS[ch]
+            num = 0
+        else:
+            return None
+    return total + num
+
+
+def _normalize_law(name: str) -> str:
+    """去掉法名中的书名号与空白, 便于子串比对."""
+    return re.sub(r"[《》\s]", "", name)
+
+
+def _legal_basis_traceable(legal_basis: str, references: list) -> bool:
+    """核验 legal_basis 引用的『法名+条号』能否在检索结果中溯源.
+
+    要求同时抽取到法名与条号, 并存在某条检索结果同时匹配二者才算命中;
+    只给法名或只给条号 (如规则降级的模糊提示) 均视为不可溯源。
+    """
+    if not references:
+        return False
+
+    cited_laws = [_normalize_law(m) for m in _LAW_NAME_RE.findall(legal_basis)]
+    cited_articles: set[int] = set()
+    for token in _ARTICLE_RE.findall(legal_basis):
+        value = _cn_numeral_to_int(token)
+        if value is not None:
+            cited_articles.add(value)
+
+    if not cited_laws or not cited_articles:
+        return False
+
+    for ref in references:
+        match = _ARTICLE_RE.search(ref.article)
+        if not match:
+            continue
+        ref_article = _cn_numeral_to_int(match.group(1))
+        if ref_article is None or ref_article not in cited_articles:
+            continue
+        ref_law = _normalize_law(ref.law_name)
+        if ref_law and any(ref_law in law or law in ref_law for law in cited_laws):
+            return True
+    return False
+
 
 
 class ReviewerAgent(BaseAgent):
@@ -150,9 +222,10 @@ class ReviewerAgent(BaseAgent):
     def _apply_quality_gate(state: AgentState) -> None:
         """证据质检 (原独立 quality_gate 节点并入本节点).
 
-        阻止缺少原文或法律依据的风险结论直接被信任: 逐条核验
-        ``original_clause`` 能否定位到合同原文、``legal_basis`` 是否为空,
-        汇总待人工复核清单并折算证据完整性置信度。
+        阻止缺少原文、法律依据为空或无法溯源的风险结论直接被信任: 逐条核验
+        ``original_clause`` 能否定位到合同原文、``legal_basis`` 是否为空, 并将
+        ``legal_basis`` 中抽取的『法名+条号』与 ``legal_references`` 逐条比对,
+        命中不了则追加『依据待人工复核』标注; 汇总待人工复核清单并折算证据完整性置信度。
         """
         issues: list[str] = []
         for risk in state.risk_assessments:
@@ -160,5 +233,7 @@ class ReviewerAgent(BaseAgent):
                 issues.append(f"{risk.title}: 原文定位待人工复核")
             if not risk.legal_basis.strip():
                 issues.append(f"{risk.title}: 缺少法律依据")
+            elif not _legal_basis_traceable(risk.legal_basis, state.legal_references):
+                issues.append(f"{risk.title}: 法律依据无法溯源，依据待人工复核")
         state.quality_issues = issues
         state.confidence_score = max(0, 100 - min(60, len(issues) * 15))
