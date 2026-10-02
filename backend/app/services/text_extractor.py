@@ -23,10 +23,11 @@ class ServiceNotReadyError(RuntimeError):
 
 def extract_pdf(data: bytes) -> tuple[str, bool]:
     """
-    抽取 PDF 文本.
+    抽取 PDF 文本 (逐页混合): 有文字层的页直取文字, 空白页自动渲染为图片并 OCR.
 
     Returns:
-        (text, is_scanned): 扫描件没有文字层时 text 为空串.
+        (text, is_scanned): is_scanned=True 表示整份 PDF 无任何文字层 (全扫描件);
+        混排 PDF (部分页有文字层) 返回 False, 但仍对无文字层的页逐页 OCR。
     """
     try:
         from pypdf import PdfReader
@@ -34,15 +35,62 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
         raise ServiceNotReadyError("PDF 抽取组件未就绪, 请稍后重试") from e
 
     reader = PdfReader(io.BytesIO(data))
-    chunks: list[str] = []
+    page_texts: list[str] = []
     for page in reader.pages:
         try:
             text = page.extract_text() or ""
         except Exception:
             text = ""
-        chunks.append(text)
-    text = "\n".join(chunks)
-    return text, len(text.strip()) == 0
+        page_texts.append(text)
+
+    # 无文字层 (需 OCR) 的页索引
+    blank_idx = [i for i, t in enumerate(page_texts) if not t.strip()]
+    if not blank_idx:
+        return "\n".join(page_texts), False
+
+    # 逐页混合: 仅对空白页渲染位图走 OCR, 有文字层的页保留原文
+    ocr_map = _ocr_pdf_pages(data, blank_idx)
+    merged = [
+        t.strip() if t.strip() else ocr_map.get(i, "")
+        for i, t in enumerate(page_texts)
+    ]
+    is_scanned = len(blank_idx) == len(page_texts)  # 全部页都无文字层 → 整份扫描件
+    return "\n\n".join(seg for seg in merged if seg), is_scanned
+
+
+def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict[int, str]:
+    """将指定页索引渲染为 PNG 并 OCR, 返回 {页索引: 识别文本}.
+
+    依赖 PyMuPDF (fitz) 渲染页面; 渲染/OCR 不可用时抛 ServiceNotReadyError 转 503。
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError as e:
+        raise ServiceNotReadyError(
+            "扫描版 PDF 需要 OCR 组件 (pymupdf), 请稍后重试"
+        ) from e
+
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+    except Exception as e:
+        raise ServiceNotReadyError(f"扫描版 PDF 解析失败: {e}") from e
+
+    ocr_map: dict[int, str] = {}
+    try:
+        zoom = dpi / 72  # PDF 基准 72dpi, 提高采样率以改善小字识别
+        matrix = fitz.Matrix(zoom, zoom)
+        total = doc.page_count
+        for idx in page_indices:
+            if idx >= total:
+                continue
+            pixmap = doc[idx].get_pixmap(matrix=matrix)
+            ocr_text, _ = extract_image(pixmap.tobytes("png"))
+            if ocr_text.strip():
+                ocr_map[idx] = ocr_text.strip()
+    finally:
+        doc.close()
+
+    return ocr_map
 
 
 # ─── DOCX ──────────────────────────────────────────────────────
