@@ -53,6 +53,7 @@
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
 | **MCP 协议支持** | 内置 MCP Server，将法条检索、条款分析、风险评分、谈判话术等能力标准化暴露，方便二次开发与外部 Agent 集成 |
+| **A2A 协议支持** | 内置 A2A（Agent2Agent Protocol）端点，对外暴露标准 Agent Card（`/.well-known/agent.json`）与 JSON-RPC 端点（`/a2a` 同步、`/a2a/stream` SSE 流式），可被任意 A2A 客户端/其他 Agent 发现并调用，实现 Agent 间对等协作 |
 | **多端覆盖** | Flutter 移动端（iOS/Android）+ Vue 3 Web 端，同一后端服务，全场景触达 |
 
 ---
@@ -105,6 +106,7 @@
 | BM25 (jieba) | 法条语料全文关键词通道（零分未命中文档不进候选），与向量通道经 **RRF** 融合；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折） |
 | Reranker（精排） | RRF 融合候选再经 `rerank_candidates` 精排：默认轻量可解释精排（召回分 + 词覆盖 + 标题命中加权），可选 CrossEncoder（`BAAI/bge-reranker-base`）语义重排，并按相似度阈值过滤后取 Top-K |
 | MinIO | 对象存储，合同文件与扫描件上传 |
+| A2A（Agent2Agent Protocol） | 标准 Agent 协议集成层（`app/a2a`）：Agent Card 自描述 + JSON-RPC 2.0（`/a2a`）+ SSE 流式（`/a2a/stream`），复用 LangGraph 工作流对外提供能力 |
 
 ---
 
@@ -154,6 +156,7 @@ flowchart TB
         S1["MySQL 8<br/>SQLModel · aiomysql"]
         S2["MinIO<br/>合同原件"]
         S3["MCP Server<br/>JSON-RPC 2.0 · 4 工具"]
+        S4["A2A Server<br/>Agent Card · /a2a · 流式"]
     end
 
     L1 --> L2 --> L3
@@ -285,6 +288,38 @@ StateGraph(AgentState)
 | `SUMMARY` | `{overall_score, overall_level, summary, ...}` | 分析完成推送总计 |
 | `ERROR` | `{message}` | 工作流级异常 |
 | `COMPLETE` | — | 流程结束 |
+
+### 6.6 A2A（Agent2Agent Protocol）
+
+除 MCP 外，Lumos 同时实现了 **A2A 协议**，让本服务作为一个可被其他 Agent 发现并调用的「对等智能体」，而不仅仅是被 LLM 调用的工具集。
+
+- 实现位于 `backend/app/a2a/`：`models.py`（协议数据模型）、`agent_card.py`（Agent Card 构建）、`executor.py`（复用 `run_contract_analysis` 工作流）、`routes.py`（端点）。
+- 兼容 **Google A2A 规范 0.3.x**：`kind` 字段区分 Part 类型、标准 `Task`/`Artifact`/`TaskStatusUpdateEvent` 模型，并兼容新旧两套方法名（`message/*` 与 `tasks/*`）。
+- 不依赖任何第三方 A2A SDK，纯 Pydantic 建模，便于在受限/离线环境部署。
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `GET` | `/.well-known/agent.json` | 返回 Agent Card（能力自描述，供 A2A 客户端发现） |
+| `POST` | `/a2a` | JSON-RPC 2.0 同步端点：`message/send`（或 `tasks/send`）提交合同文本，返回终态 `Task`（含风险清单 Artifact） |
+| `POST` | `/a2a/stream` | SSE 流式 JSON-RPC：`message/stream`（或 `tasks/sendSubscribe`）逐阶段推送 `TaskStatusUpdateEvent` 与 `TaskArtifactUpdateEvent` |
+
+**调用示例（A2A 同步）**
+
+```bash
+curl -X POST http://localhost:8000/a2a \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "jsonrpc": "2.0", "id": 1, "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "（粘贴劳动合同正文）"}]
+      }
+    }
+  }'
+```
+
+返回的 `result.artifacts` 含 `risk_assessments`（结构化 JSON）与 `report`（Markdown 报告），`result.status.state` 为 `completed`。
 
 ---
 
@@ -469,6 +504,9 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `GET` | `/api/v1/contracts/{id}` | 查询单个合同记录 |
 | MCP 工具 | `GET` | `/api/v1/mcp/tools` | 列出 MCP 工具（含 schema） |
 | | `POST` | `/api/v1/mcp/tools/call` | 调用 MCP 工具 |
+| A2A 协议 | `GET` | `/.well-known/agent.json` | Agent Card（能力自描述） |
+| | `POST` | `/a2a` | A2A JSON-RPC 同步端点（message/send） |
+| | `POST` | `/a2a/stream` | A2A SSE 流式端点（message/stream） |
 | 智能导入 | `POST` | `/api/v1/ingest/file` | 上传文件抽取文本（16 种格式 + OCR） |
 | | `POST` | `/api/v1/ingest/url` | 抓取网页抽取正文 |
 | 智能咨询 | `POST` | `/api/v1/consult/ask` | 发起智能咨询（SSE 流式） |
@@ -527,6 +565,7 @@ lumos/
 │   │   ├── api/v1/                    # FastAPI 路由
 │   │   ├── core/                      # 配置、数据库、安全、MinIO
 │   │   ├── mcp/                       # MCP 协议（Server/Client/Tools）
+│   │   ├── a2a/                       # A2A 协议（Agent Card / JSON-RPC / SSE）
 │   │   ├── models/                    # 数据模型（SQLModel）
 │   │   ├── schemas/                   # Pydantic 出入参 / SSE 事件协议
 │   │   ├── services/                  # 文本摄取（16 种格式 + OCR）

@@ -122,6 +122,15 @@ class Settings(BaseSettings):
     dependency_connect_timeout_seconds: float = 2.0
     dependency_read_timeout_seconds: float = 5.0
 
+    # ── A2A (Agent2Agent Protocol) ───────────────────────────
+    # 将 Lumos 暴露为标准 A2A Agent, 供其他 Agent 发现并调用。
+    a2a_enabled: bool = True
+    # 对外可访问的 A2A 基址 (含协议与域名); 留空则回退到 app_host:app_port
+    # (容器内常为 0.0.0.0 不可路由, 生产务必显式配置, 如 https://lumos.example.com)。
+    a2a_public_url: str = ""
+    # A2A JSON-RPC 端点路径 (Agent Card 的 url 据此拼接)。
+    a2a_base_path: str = "/a2a"
+
     # ── 日志 ──────────────────────────────────────────────────
     log_level: str = "DEBUG"
 

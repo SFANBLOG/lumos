@@ -80,6 +80,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.mcp.server import get_mcp_server
     get_mcp_server()
 
+    # 初始化 A2A 服务端 (Agent Card 自描述)
+    if settings.a2a_enabled:
+        from app.a2a.agent_card import get_agent_card
+
+        _card = get_agent_card()
+        logger.info(
+            f"🤝 A2A 端点就绪: {_card.url} | skills: {[s.id for s in _card.skills]} | "
+            f"流式: {_card.capabilities.streaming}"
+        )
+
     # 初始化技能注册中心
     from app.skills import list_skills
     logger.info(f"🛠️ 技能列表: {list_skills()}")
@@ -136,6 +146,13 @@ def create_app() -> FastAPI:
 
     # ── 注册 API 路由 ──
     app.include_router(v1_router)
+
+    # ── 注册 A2A 协议端点 (Agent Card + JSON-RPC + SSE 流式) ──
+    if settings.a2a_enabled:
+        from app.a2a.routes import router as a2a_router
+
+        app.include_router(a2a_router)
+        logger.info("🤝 已挂载 A2A 路由: /.well-known/agent.json, /a2a, /a2a/stream")
 
     # ── 根路径: 服务信息 (替代遗留的 HTML demo 首页) ──
     @app.get("/", include_in_schema=False)
