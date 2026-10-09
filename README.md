@@ -412,7 +412,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **36 条 pytest 用例**（默认跑 34 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支（见 `backend/tests/`）；
+- 当前 **43 条 pytest 用例**（默认跑 41 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层（见 `backend/tests/`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -572,7 +572,7 @@ lumos/
 │   │   └── skills/                    # 可复用技能
 │   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
 │   │   └── retrieval_eval.py
-│   ├── tests/                         # 36 条 pytest 用例（34 默认 + 2 e2e marker）
+│   ├── tests/                         # 43 条 pytest 用例（41 默认 + 2 e2e marker）
 │   ├── models/                        # 本地 embedding 权重（bge-base-zh-v1.5，已 gitignore）
 │   ├── logs/                          # 运行日志（每日轮转/保留 30 天，已 gitignore）
 │   ├── pyproject.toml
