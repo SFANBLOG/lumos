@@ -107,6 +107,10 @@ async def _runner(contract_id: str, raw_text: str, sess: _TaskSession) -> None:
                         # 先落库再入缓冲: 客户端收到 COMPLETE 后立即查报告不会扑空
                         await _set_status(session, contract_id, ContractStatus.COMPLETED)
                         terminal = ContractStatus.COMPLETED
+                    elif event.event == SSEEventType.AWAITING_REVIEW:
+                        # 流程挂起等待人工审批: 保持挂起态, 不应被判为失败
+                        await _set_status(session, contract_id, ContractStatus.AWAITING_REVIEW)
+                        terminal = ContractStatus.AWAITING_REVIEW
                     elif event.event == SSEEventType.ERROR:
                         await _set_status(session, contract_id, ContractStatus.FAILED)
                         terminal = ContractStatus.FAILED

@@ -32,6 +32,7 @@ class SSEEventType(str, Enum):
     SUMMARY = "summary"  # 分析总结
     COMPLETE = "complete"  # 全部完成
     ERROR = "error"  # 发生错误
+    AWAITING_REVIEW = "awaiting_review"  # 流程挂起, 等待人工审批
 
 
 class SSEEvent(BaseModel):

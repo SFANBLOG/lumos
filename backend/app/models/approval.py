@@ -11,7 +11,7 @@ class ApprovalTask(SQLModel, table=True):
     __tablename__="approval_tasks"
     id: str = Field(default_factory=lambda:str(uuid.uuid4()), primary_key=True)
     contract_id: str = Field(foreign_key="contracts.id", index=True)
-    requester_id: str = Field(foreign_key="users.id", index=True)
+    requester_id: str | None = Field(default=None, foreign_key="users.id", index=True)
     reviewer_id: str | None = Field(default=None, foreign_key="users.id", index=True)
     status: ApprovalStatus = Field(default=ApprovalStatus.PENDING, index=True)
     comment: str = Field(default="", max_length=1000)

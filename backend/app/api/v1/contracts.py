@@ -21,6 +21,7 @@ from sqlmodel import select
 from app.api.deps import AuthAny, DBSession
 from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
+from app.agent.graph import publish_after_review
 from app.services import analysis_task
 from app.services.audit import record_audit_event
 from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse
@@ -265,6 +266,62 @@ async def stream_analysis(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Nginx 禁用缓冲
+        },
+    )
+
+
+# ─── GET /contracts/{id}/resume-stream (人工审批后发布) ──────────
+
+
+@router.get(
+    "/{contract_id}/resume-stream",
+    summary="审批通过后发布分析结果 (续跑)",
+    description="合同处于 awaiting_review/analyzing 时, 从快照恢复并发布已完成的报告, 通过 SSE 推送。",
+)
+async def resume_stream_analysis(
+    contract_id: str,
+    session: DBSession,
+    _auth: AuthAny,
+) -> StreamingResponse:
+    """审批通过后, 从 analysis_snapshot 恢复状态, 落库并推送 SUMMARY/COMPLETE 事件."""
+    contract = await session.get(Contract, contract_id)
+    if not contract:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"合同 {contract_id} 不存在",
+        )
+    if contract.status not in (ContractStatus.AWAITING_REVIEW, ContractStatus.ANALYZING):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"当前状态 {contract.status.value} 无需续跑",
+        )
+    if not contract.analysis_snapshot:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="无续跑快照, 无法恢复",
+        )
+
+    async def event_generator():
+        try:
+            async for event in publish_after_review(contract_id, contract.analysis_snapshot, session):
+                data = json.dumps(event.data, ensure_ascii=False)
+                yield f"event: {event.event.value}\ndata: {data}\n\n"
+                await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            logger.warning(f"resume SSE 连接中断 | 合同ID: {contract_id}")
+            raise
+        except Exception as e:
+            logger.exception(f"resume SSE 流异常 | 合同ID: {contract_id}")
+            err = json.dumps({"message": f"续跑失败: {e}"}, ensure_ascii=False)
+            yield f"event: error\ndata: {err}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 

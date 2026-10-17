@@ -115,4 +115,33 @@ export const contractApi = {
     eventSource.onmessage = (e: MessageEvent) => dispatch('message', e.data)
     return eventSource
   },
+  /**
+   * 订阅「人工审批后」的发布 SSE 流 (resume-stream).
+   */
+  resumeStream(contractId: string, onEvent: (event: SSEvent) => void) {
+    const eventSource = new EventSource(`/api/v1/contracts/${contractId}/resume-stream`)
+    const names = [
+      'thinking',
+      'node_start',
+      'node_complete',
+      'risk_found',
+      'summary',
+      'complete',
+      'error',
+    ]
+    const dispatch = (event: string, raw: string) => {
+      let data: any = raw
+      try {
+        data = JSON.parse(raw)
+      } catch {
+        /* 非 JSON 负载原样透传 */
+      }
+      onEvent({ event, data })
+    }
+    names.forEach((name) => {
+      eventSource.addEventListener(name, (e: MessageEvent) => dispatch(name, e.data))
+    })
+    eventSource.onmessage = (e: MessageEvent) => dispatch('message', e.data)
+    return eventSource
+  },
 }

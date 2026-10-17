@@ -17,7 +17,9 @@ runner 按线性图顺序预推, 保持原有 SSE 时间线语义。
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -31,7 +33,9 @@ from app.agent.sub_agents.extractor_agent import ExtractorAgent
 from app.agent.sub_agents.negotiator_agent import NegotiatorAgent
 from app.agent.sub_agents.retriever_agent import RetrieverAgent
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
-from app.models.analysis import AnalysisResult, RiskItem
+from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
+from app.models.contract import Contract, ContractStatus
+from app.models.approval import ApprovalTask
 from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 
 #: 工作流节点序列 (线性链, 顺序即执行顺序)
@@ -181,6 +185,27 @@ async def run_contract_analysis(
         )
         return
 
+    # 全图完成: 判断是否需要人工介入 (待复核项 或 高风险)
+    needs_review = bool(final_state.quality_issues) or final_state.overall_level == RiskLevel.HIGH
+    if needs_review:
+        if session is not None:
+            await _save_snapshot_and_create_approval(contract_id, final_state, session)
+        reasons = list(final_state.quality_issues)
+        if final_state.overall_level == RiskLevel.HIGH:
+            reasons.append(f"整体风险等级: {final_state.overall_level.value}")
+        yield SSEEvent(
+            event=SSEEventType.AWAITING_REVIEW,
+            data={
+                "contract_id": contract_id,
+                "quality_issues": final_state.quality_issues,
+                "overall_level": final_state.overall_level.value,
+                "risk_count": len(final_state.risk_assessments),
+                "reasons": reasons,
+                "message": "⏸️ 存在待人工复核项或高风险，流程已挂起等待审批",
+            },
+        )
+        return
+
     if session is not None:
         await _persist(final_state, session)
 
@@ -246,3 +271,64 @@ async def _persist(state: AgentState, session: AsyncSession) -> None:
     except Exception as e:
         logger.error(f"💾 持久化失败: {e}")
         await session.rollback()
+
+
+async def _save_snapshot_and_create_approval(
+    contract_id: str, state: AgentState, session: AsyncSession
+) -> None:
+    """流程挂起: 落库中间状态快照 + 自动创建审批任务."""
+    snapshot = state.model_dump(exclude={"events"})
+    contract = await session.get(Contract, contract_id)
+    if contract is not None:
+        contract.analysis_snapshot = json.dumps(snapshot, ensure_ascii=False, default=str)
+        contract.status = ContractStatus.AWAITING_REVIEW
+        contract.updated_at = datetime.now(UTC)
+        session.add(contract)
+    task = ApprovalTask(
+        contract_id=contract_id,
+        requester_id=contract.requester_id if contract else None,
+    )
+    session.add(task)
+    await session.commit()
+    logger.info(
+        f"⏸️ 流程挂起等待人工审批 | 合同ID: {contract_id} | 待复核项: {state.quality_issues}"
+    )
+
+
+async def publish_after_review(
+    contract_id: str,
+    snapshot: dict[str, Any] | str,
+    session: AsyncSession | None = None,
+) -> AsyncGenerator[SSEEvent, None]:
+    """审批通过后发布: 从快照恢复状态, 落库分析结果并推送 SUMMARY/COMPLETE 事件."""
+    data: dict[str, Any] = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    state_fields = {k: v for k, v in data.items() if k in AgentState.model_fields}
+    state = AgentState.model_validate(state_fields)
+
+    if session is not None:
+        await _persist(state, session)
+        contract = await session.get(Contract, contract_id)
+        if contract is not None:
+            contract.status = ContractStatus.COMPLETED
+            contract.updated_at = datetime.now(UTC)
+            session.add(contract)
+            await session.commit()
+
+    yield SSEEvent(
+        event=SSEEventType.SUMMARY,
+        data={
+            "overall_score": state.overall_score,
+            "overall_level": state.overall_level.value,
+            "summary": state.summary,
+            "total_clauses": len(state.extracted_clauses),
+            "total_risks": len(state.risk_assessments),
+            "legal_references_count": len(state.legal_references),
+            "confidence_score": state.confidence_score,
+            "quality_issues": state.quality_issues,
+            "contract_facts": state.contract_facts,
+        },
+    )
+    yield SSEEvent(
+        event=SSEEventType.COMPLETE,
+        data={"message": "✨ 合同风险排查完成！"},
+    )

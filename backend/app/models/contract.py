@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from enum import Enum
 
-from sqlalchemy import Column
+from sqlalchemy import Column, TEXT
 from sqlmodel import Field, SQLModel
 
 from app.models.long_text import LongText
@@ -32,6 +32,7 @@ class ContractStatus(str, Enum):
 
     PENDING = "pending"  # 等待分析
     ANALYZING = "analyzing"  # 分析中
+    AWAITING_REVIEW = "awaiting_review"  # 等待人工审批 (流程挂起)
     COMPLETED = "completed"  # 分析完成
     FAILED = "failed"  # 分析失败
 
@@ -65,6 +66,19 @@ class Contract(SQLModel, table=True):
     status: ContractStatus = Field(
         default=ContractStatus.PENDING,
         description="当前处理状态",
+    )
+
+    # ---- 人工介入 ----
+    analysis_snapshot: str | None = Field(
+        default=None,
+        sa_column=Column(TEXT),
+        description="流程挂起时的中间状态快照 (JSON), 供审批后续跑恢复",
+    )
+    requester_id: str | None = Field(
+        default=None,
+        foreign_key="users.id",
+        index=True,
+        description="提交人 (自动创建审批任务时关联)",
     )
 
     # ---- 元数据 ----

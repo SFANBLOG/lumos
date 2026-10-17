@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import select
 from app.api.deps import DBSession, get_current_user
 from app.models.approval import ApprovalStatus, ApprovalTask
-from app.models.contract import Contract
+from app.models.contract import Contract, ContractStatus
 from app.models.user import User
 from app.services.audit import record_audit_event
 router=APIRouter(prefix="/approvals", tags=["✅ 审批协作"])
@@ -50,7 +50,12 @@ async def decide(task_id:str, body:Decision, session:DBSession, user:User=Depend
     if user.role.value not in {"owner","admin","auditor"}: raise HTTPException(status.HTTP_403_FORBIDDEN,"需要审批权限")
     task=await session.get(ApprovalTask,task_id)
     if not task or task.status!=ApprovalStatus.PENDING: raise HTTPException(409,"审批任务不存在或已处理")
-    task.status=body.status;task.comment=body.comment;task.reviewer_id=user.id;task.decided_at=datetime.now(UTC);session.add(task);await record_audit_event(session,action=f"approval.{body.status.value}",resource_type="contract",resource_id=task.contract_id,actor_id=user.id);await session.commit();return task
+    task.status=body.status;task.comment=body.comment;task.reviewer_id=user.id;task.decided_at=datetime.now(UTC);session.add(task)
+    # 人工介入衔接: 合同此前因待复核项/高风险挂起, 审批通过则置为可发布(续跑)状态
+    contract=await session.get(Contract,task.contract_id)
+    if contract and contract.status==ContractStatus.AWAITING_REVIEW and body.status==ApprovalStatus.APPROVED:
+        contract.status=ContractStatus.ANALYZING;contract.updated_at=datetime.now(UTC);session.add(contract)
+    await record_audit_event(session,action=f"approval.{body.status.value}",resource_type="contract",resource_id=task.contract_id,actor_id=user.id);await session.commit();return task
 @router.get("/contracts/{contract_id}")
 async def list_tasks(contract_id:str,session:DBSession,user:User=Depends(get_current_user)):
     return (await session.execute(select(ApprovalTask).where(ApprovalTask.contract_id==contract_id).order_by(ApprovalTask.created_at.desc()))).scalars().all()
