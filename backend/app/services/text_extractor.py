@@ -110,7 +110,9 @@ def extract_docx(data: bytes) -> tuple[str, bool]:
         for row in table.rows:
             cells = [c.text.strip() for c in row.cells if c.text.strip()]
             if cells:
-                parts.append(" | ".join(cells))
+                # 合并单元格在 row.cells 中会被展开为连续重复内容, 去重避免冗余
+                dedup = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+                parts.append(" | ".join(dedup))
     return "\n".join(parts), False
 
 
@@ -372,7 +374,9 @@ def _collect_pptx_shapes(shapes) -> list[str]:
             for row in shape.table.rows:
                 cells = [c.text.strip() for c in row.cells if c.text.strip()]
                 if cells:
-                    collected.append(" | ".join(cells))
+                    # 合并单元格展开为连续重复, 去重
+                    dedup = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+                    collected.append(" | ".join(dedup))
     return collected
 
 
