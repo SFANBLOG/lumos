@@ -29,8 +29,16 @@ class RiskLevel(str, Enum):
 
 
 class RiskCategory(str, Enum):
-    """十大坑点分类."""
+    """风险分类: 初版十大坑点 + 劳动仲裁高发案由扩充 6 类 (共 16 类).
 
+    扩充依据为劳动争议仲裁高频案由——"违法解除/赔偿金""经济补偿金""
+    未签书面合同二倍工资""加班费""违法约定违约金""押金/扣押证件"
+    均为《劳动合同法》有明确条文、裁决量大的争议类型, 且原先的十大
+    坑点未覆盖 (``resignation`` 只覆盖劳动者主动辞职的审批, 不覆盖
+    用人单位解除的合法性与补偿标准)。
+    """
+
+    # ── 初版十大坑点 ────────────────────────────────────────────
     NON_COMPETE = "non_compete"  # 竞业禁止
     PROBATION_SALARY = "probation_salary"  # 试用期薪资
     PROBATION_INSURANCE = "probation_insurance"  # 试用期社保
@@ -41,6 +49,14 @@ class RiskCategory(str, Enum):
     LEAVE_RIGHTS = "leave_rights"  # 休假权益
     JURISDICTION = "jurisdiction"  # 管辖地争议
     TRAINING_BOND = "training_bond"  # 培训服务期
+
+    # ── 扩充 6 类: 劳动仲裁高发案由 ─────────────────────────────
+    UNLAWFUL_TERMINATION = "unlawful_termination"  # 违法解除/终止 (2N 赔偿金)
+    SEVERANCE_PAY = "severance_pay"  # 经济补偿金 (N)
+    NO_WRITTEN_CONTRACT = "no_written_contract"  # 未签书面合同 (二倍工资)
+    OVERTIME_PAY = "overtime_pay"  # 加班费与工时上限
+    ILLEGAL_PENALTY = "illegal_penalty"  # 违法约定违约金
+    DEPOSIT_GUARANTEE = "deposit_guarantee"  # 押金/扣押证件/担保
 
 
 class AnalysisResult(SQLModel, table=True):

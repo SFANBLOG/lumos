@@ -25,6 +25,13 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
     """
     抽取 PDF 文本 (逐页混合): 有文字层的页直取文字, 空白页自动渲染为图片并 OCR.
 
+    跨页表格后处理: 逐页抽取完成后, 若开启 ``pdf_cross_page_table_merge``
+    (默认开), 会把被页边界切开的表格按"表头重复 / 列数一致 / 末行截断 /
+    版面 y 坐标连续 / 表题连续"重新拼回一张 (详见 ``table_merge.py``)。
+    其中版面几何由 ``pdf_layout_geometry`` 控制: 有文字层的页用 PyMuPDF
+    矢量线框, 扫描页复用已渲染位图跑 Tesseract 词框 (详见 ``table_layout.py``);
+    拿不到几何时自动退回纯文本信号, 不会让功能退化。
+
     Returns:
         (text, is_scanned): is_scanned=True 表示整份 PDF 无任何文字层 (全扫描件);
         混排 PDF (部分页有文字层) 返回 False, 但仍对无文字层的页逐页 OCR。
@@ -34,6 +41,9 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
     except ImportError as e:
         raise ServiceNotReadyError("PDF 抽取组件未就绪, 请稍后重试") from e
 
+    from app.core.config import get_settings
+
+    settings = get_settings()
     reader = PdfReader(io.BytesIO(data))
     page_texts: list[str] = []
     for page in reader.pages:
@@ -45,21 +55,46 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
 
     # 无文字层 (需 OCR) 的页索引
     blank_idx = [i for i, t in enumerate(page_texts) if not t.strip()]
+    pixmaps: dict[int, bytes] = {}
     if not blank_idx:
-        return "\n".join(page_texts), False
+        segments = [t.strip() for t in page_texts]
+    else:
+        # 逐页混合: 仅对空白页渲染位图走 OCR, 有文字层的页保留原文
+        # 开启版面几何时顺带保留"含表格"的页位图, 供 Tesseract 词框复用 (不重复渲染)
+        ocr_map, pixmaps = _ocr_pdf_pages(
+            data, blank_idx, capture_pixmaps=settings.pdf_layout_geometry
+        )
+        segments = [
+            t.strip() if t.strip() else ocr_map.get(i, "")
+            for i, t in enumerate(page_texts)
+        ]
 
-    # 逐页混合: 仅对空白页渲染位图走 OCR, 有文字层的页保留原文
-    ocr_map = _ocr_pdf_pages(data, blank_idx)
-    merged = [
-        t.strip() if t.strip() else ocr_map.get(i, "")
-        for i, t in enumerate(page_texts)
-    ]
+    # 跨页表格合并 (无表格或页数<2 时为无副作用的恒等变换)
+    if settings.pdf_cross_page_table_merge:
+        from app.services.table_merge import merge_cross_page_tables
+
+        layouts: dict[int, list] = {}
+        if settings.pdf_layout_geometry:
+            from app.services.table_layout import extract_pdf_layout
+
+            layouts = extract_pdf_layout(data, blank_idx, ocr_renderer=pixmaps.get)
+
+        segments = merge_cross_page_tables(segments, layouts=layouts or None)
+
     is_scanned = len(blank_idx) == len(page_texts)  # 全部页都无文字层 → 整份扫描件
-    return "\n\n".join(seg for seg in merged if seg), is_scanned
+    return "\n\n".join(seg for seg in segments if seg), is_scanned
 
 
-def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict[int, str]:
-    """将指定页索引渲染为 PNG 并 OCR, 返回 {页索引: 识别文本}.
+def _ocr_pdf_pages(
+    data: bytes,
+    page_indices: list[int],
+    dpi: int = 200,
+    capture_pixmaps: bool = False,
+) -> tuple[dict[int, str], dict[int, bytes]]:
+    """将指定页索引渲染为 PNG 并 OCR, 返回 ({页索引: 文本}, {页索引: 位图}).
+
+    ``capture_pixmaps=True`` 时保留位图供版面几何复用 (避免重复渲染); 为控制
+    内存, 只保留"OCR 文本里确实含表格行"的页, 纯正文页直接丢弃。
 
     依赖 PyMuPDF (fitz) 渲染页面; 渲染/OCR 不可用时抛 ServiceNotReadyError 转 503。
     """
@@ -76,6 +111,7 @@ def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict
         raise ServiceNotReadyError(f"扫描版 PDF 解析失败: {e}") from e
 
     ocr_map: dict[int, str] = {}
+    pixmap_map: dict[int, bytes] = {}
     try:
         zoom = dpi / 72  # PDF 基准 72dpi, 提高采样率以改善小字识别
         matrix = fitz.Matrix(zoom, zoom)
@@ -83,14 +119,25 @@ def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict
         for idx in page_indices:
             if idx >= total:
                 continue
-            pixmap = doc[idx].get_pixmap(matrix=matrix)
-            ocr_text, _ = extract_image(pixmap.tobytes("png"))
+            png = doc[idx].get_pixmap(matrix=matrix).tobytes("png")
+            ocr_text, _ = extract_image(png)
             if ocr_text.strip():
                 ocr_map[idx] = ocr_text.strip()
+            if capture_pixmaps and _looks_like_table_page(ocr_text):
+                pixmap_map[idx] = png
     finally:
         doc.close()
 
-    return ocr_map
+    return ocr_map, pixmap_map
+
+
+def _looks_like_table_page(text: str) -> bool:
+    """该页 OCR 文本里是否含表格行 (≥2 列), 用于决定要不要保留位图做几何提取."""
+    if not text:
+        return False
+    from app.services.table_merge import split_row
+
+    return any(split_row(line) for line in text.split("\n"))
 
 
 # ─── DOCX ──────────────────────────────────────────────────────

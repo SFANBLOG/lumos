@@ -102,9 +102,14 @@
     "keywords": [
       "第九条",
       "general",
-      "劳动合同法"
+      "劳动合同法",
+      "扣押证件",
+      "居民身份证",
+      "担保",
+      "收取财物",
+      "押金"
     ],
-    "category": "general",
+    "category": "deposit_guarantee",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -114,9 +119,11 @@
     "keywords": [
       "第十条",
       "job_description",
-      "劳动合同法"
+      "劳动合同法",
+      "书面劳动合同",
+      "用工之日起一个月内"
     ],
-    "category": "job_description",
+    "category": "no_written_contract",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -162,9 +169,11 @@
     "keywords": [
       "第十四条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "无固定期限劳动合同",
+      "连续工作满十年"
     ],
-    "category": "resignation",
+    "category": "no_written_contract",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -294,9 +303,12 @@
     "keywords": [
       "第二十五条",
       "salary_deduction",
-      "劳动合同法"
+      "劳动合同法",
+      "违约金",
+      "不得约定",
+      "劳动者承担"
     ],
-    "category": "salary_deduction",
+    "category": "illegal_penalty",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -306,9 +318,12 @@
     "keywords": [
       "第二十六条",
       "jurisdiction",
-      "劳动合同法"
+      "劳动合同法",
+      "合同无效",
+      "免除法定责任",
+      "排除劳动者权利"
     ],
-    "category": "jurisdiction",
+    "category": "illegal_penalty",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -366,9 +381,12 @@
     "keywords": [
       "第三十一条",
       "leave_rights",
-      "劳动合同法"
+      "劳动合同法",
+      "不得强迫加班",
+      "变相强迫",
+      "支付加班费"
     ],
-    "category": "leave_rights",
+    "category": "overtime_pay",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -378,9 +396,12 @@
     "keywords": [
       "第三十二条",
       "job_description",
-      "劳动合同法"
+      "劳动合同法",
+      "违章指挥",
+      "强令冒险作业",
+      "不视为违反合同"
     ],
-    "category": "job_description",
+    "category": "obedience_clause",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -414,9 +435,13 @@
     "keywords": [
       "第三十五条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "变更劳动合同",
+      "协商一致",
+      "书面形式",
+      "调岗"
     ],
-    "category": "resignation",
+    "category": "obedience_clause",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -462,9 +487,12 @@
     "keywords": [
       "第三十九条",
       "probation_salary",
-      "劳动合同法"
+      "劳动合同法",
+      "过失性辞退",
+      "严重违反规章制度",
+      "不符合录用条件"
     ],
-    "category": "probation_salary",
+    "category": "unlawful_termination",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -474,9 +502,13 @@
     "keywords": [
       "第四十条",
       "probation_salary",
-      "劳动合同法"
+      "劳动合同法",
+      "无过失性辞退",
+      "不能胜任工作",
+      "代通知金",
+      "提前三十日"
     ],
-    "category": "probation_salary",
+    "category": "unlawful_termination",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -498,9 +530,14 @@
     "keywords": [
       "第四十二条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "不得解除",
+      "孕期",
+      "产期",
+      "哺乳期",
+      "医疗期"
     ],
-    "category": "resignation",
+    "category": "unlawful_termination",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -510,9 +547,11 @@
     "keywords": [
       "第四十三条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "通知工会",
+      "单方解除程序"
     ],
-    "category": "resignation",
+    "category": "unlawful_termination",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -546,9 +585,12 @@
     "keywords": [
       "第四十六条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "经济补偿",
+      "支付情形",
+      "协商一致解除"
     ],
-    "category": "resignation",
+    "category": "severance_pay",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -558,9 +600,13 @@
     "keywords": [
       "第四十七条",
       "probation_salary",
-      "劳动合同法"
+      "劳动合同法",
+      "经济补偿计算",
+      "每满一年一个月工资",
+      "N+1",
+      "月平均工资"
     ],
-    "category": "probation_salary",
+    "category": "severance_pay",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -570,9 +616,12 @@
     "keywords": [
       "第四十八条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "违法解除",
+      "继续履行",
+      "赔偿金"
     ],
-    "category": "resignation",
+    "category": "unlawful_termination",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -978,9 +1027,12 @@
     "keywords": [
       "第八十二条",
       "probation_salary",
-      "劳动合同法"
+      "劳动合同法",
+      "二倍工资",
+      "双倍工资",
+      "未订立书面合同"
     ],
-    "category": "probation_salary",
+    "category": "no_written_contract",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -1002,9 +1054,12 @@
     "keywords": [
       "第八十四条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "责令退还",
+      "扣押档案",
+      "罚款"
     ],
-    "category": "resignation",
+    "category": "deposit_guarantee",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -1014,9 +1069,12 @@
     "keywords": [
       "第八十五条",
       "probation_salary",
-      "劳动合同法"
+      "劳动合同法",
+      "未支付经济补偿",
+      "加付赔偿金",
+      "责令限期支付"
     ],
-    "category": "probation_salary",
+    "category": "severance_pay",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {
@@ -1038,9 +1096,12 @@
     "keywords": [
       "第八十七条",
       "resignation",
-      "劳动合同法"
+      "劳动合同法",
+      "二倍赔偿金",
+      "2N",
+      "违法解除赔偿"
     ],
-    "category": "resignation",
+    "category": "unlawful_termination",
     "source": "政府公开文本：劳动合同法（2012修正）"
   },
   {

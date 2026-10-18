@@ -314,9 +314,11 @@
       "劳动关系",
       "用人单位",
       "劳动者",
-      "劳动保障监察条例"
+      "劳动保障监察条例",
+      "不依法订立劳动合同",
+      "责令改正"
     ],
-    "category": "jurisdiction",
+    "category": "no_written_contract",
     "source": "政府公开文本：《劳动保障监察条例》（国务院令第423号）https://www.gov.cn/zhengce/content/2008-03/28/content_7383.htm"
   },
   {
@@ -328,9 +330,11 @@
       "用人单位",
       "劳动者",
       "100元",
-      "劳动保障监察条例"
+      "劳动保障监察条例",
+      "延长工作时间",
+      "责令限期改正"
     ],
-    "category": "jurisdiction",
+    "category": "overtime_pay",
     "source": "政府公开文本：《劳动保障监察条例》（国务院令第423号）https://www.gov.cn/zhengce/content/2008-03/28/content_7383.htm"
   },
   {

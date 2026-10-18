@@ -37,7 +37,8 @@ REVIEWER_SYSTEM_PROMPT = """\
 ## 风险分类 (category 字段):
 non_compete, probation_salary, probation_insurance, salary_deduction,
 job_description, obedience_clause, resignation, leave_rights,
-jurisdiction, training_bond
+jurisdiction, training_bond, unlawful_termination, severance_pay,
+no_written_contract, overtime_pay, illegal_penalty, deposit_guarantee
 
 ## 输出格式:
 请严格以 JSON 对象的形式输出，包含:

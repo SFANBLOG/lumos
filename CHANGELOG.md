@@ -17,6 +17,22 @@
 - ⚙️ 新增配置项 `HYBRID_VECTOR_WEIGHT` / `HYBRID_SINGLE_CHANNEL_FACTOR`，根 `.env.example` 与 `backend/.env.example` 同步
 - 🧪 新增检索用例（无关查询返回空、双通道加权分数、单通道折扣）；检索 18 条 + 工作流 4 条测试全绿，离线评测三通道 hit@k/MRR 无回归
 
+### 📄 PDF 跨页表格检测与合并（扫描件 / 文字层通用）
+
+- 🐛 **修复跨页表格被切成两张半张表**：原 PDF 链路为逐页独立抽取（有文字层直取、无文字层渲染位图 OCR），页与页之间不做拼接，跨页表下页还会重复表头
+- 🧩 新增 `app/services/table_merge.py`：行切分（兼容 ` | ` / 连续空格 / 制表符三种列分隔）、块检测、按五类信号加权判定、去重复表头并按最大列数补齐（只补不截断）、支持 3 页以上链式合并
+- 📐 新增 `app/services/table_layout.py` 启用**版面 y 坐标连续性**信号：有文字层页用 PyMuPDF `page.find_tables()` 取矢量线框，扫描页复用已渲染位图跑 Tesseract `image_to_data` 词框聚区（不重复渲染，仅对含表格的页执行）
+- ⚙️ 新增配置项 `PDF_CROSS_PAGE_TABLE_MERGE` / `PDF_LAYOUT_GEOMETRY`（默认均开），可分别退回逐页独立抽取与纯文本判定
+- 🧪 新增 24 条用例，含「无表格时输出与改造前逐字节一致」的回归守卫
+
+### 🏷️ 风险类别从 10 类扩充至 16 类
+
+- ➕ 新增 6 类劳动仲裁高发案由：`unlawful_termination`（违法解除/2N 赔偿金）、`severance_pay`（经济补偿金 N）、`no_written_contract`（未签书面合同二倍工资）、`overtime_pay`（加班费与工时）、`illegal_penalty`（违法约定违约金）、`deposit_guarantee`（押金/扣押证件/担保）
+- 🐛 **修复扩充类别在语料中 0 条、检索命中恒为 0 的问题**：新增类别对应的条文其实已存在于 `data/*.json`，只是 `category` 标注不准（如第87条违法解除二倍赔偿金被标成 `resignation`、第47条经济补偿标准被标成 `probation_salary`、第9条禁止扣押证件被标成 `general`）。因 `_load_full_corpus()` 按 `(law_name, article)` 去重且保留首次出现，往 `law_corpus_ext.py` 追加同名条文会被静默丢弃，故改为就地修正 JSON，共修正 **26 条**
+- 🐛 顺带修复 `obedience_clause` 在 659 条语料中 0 条的历史缺口（补入第32、35条）
+- 🛠️ 新增 `scripts/recategorize_laws.py`（可重复执行，支持 `--write` 落盘）记录并复现上述分类修正
+- 🧪 新增 `tests/test_risk_categories.py` 共 56 条守卫用例，把「漏改只会静默降级」变成显式失败：类别必须有语料、必须有分类关键词 / 谈判话术 / 追问语料、提示词与前端标签必须与枚举一致
+
 ---
 
 ## [0.2.2] - 2026-09-10

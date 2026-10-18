@@ -470,9 +470,11 @@
       "八小时",
       "四十四小时",
       "工时制度",
-      "劳动法"
+      "劳动法",
+      "每日八小时",
+      "每周四十四小时"
     ],
-    "category": "leave_rights",
+    "category": "overtime_pay",
     "source": "政府公开文本：《中华人民共和国劳动法》（2018修正），来源URL：http://www.npc.gov.cn/zgrdw/npc/xinwen/2019-01/07/content_2070261.htm（交叉校验：http://www.gd.gov.cn/zwgk/wjk/zcfgk/content/mpost_2532147.html）"
   },
   {
@@ -537,9 +539,11 @@
       "每日一小时",
       "每月三十六小时",
       "加班限制",
-      "劳动法"
+      "劳动法",
+      "每月不得超过三十六小时",
+      "加班上限"
     ],
-    "category": "leave_rights",
+    "category": "overtime_pay",
     "source": "政府公开文本：《中华人民共和国劳动法》（2018修正），来源URL：http://www.npc.gov.cn/zgrdw/npc/xinwen/2019-01/07/content_2070261.htm（交叉校验：http://www.gd.gov.cn/zwgk/wjk/zcfgk/content/mpost_2532147.html）"
   },
   {
@@ -577,9 +581,10 @@
       "百分之一百五十",
       "百分之二百",
       "百分之三百",
-      "劳动法"
+      "劳动法",
+      "补休"
     ],
-    "category": "leave_rights",
+    "category": "overtime_pay",
     "source": "政府公开文本：《中华人民共和国劳动法》（2018修正），来源URL：http://www.npc.gov.cn/zgrdw/npc/xinwen/2019-01/07/content_2070261.htm（交叉校验：http://www.gd.gov.cn/zwgk/wjk/zcfgk/content/mpost_2532147.html）"
   },
   {

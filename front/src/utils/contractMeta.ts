@@ -34,6 +34,12 @@ export const categoryLabels: Record<string, string> = {
   leave_rights: '休假权益',
   jurisdiction: '管辖地争议',
   training_bond: '培训服务期',
+  unlawful_termination: '违法解除合同',
+  severance_pay: '经济补偿金',
+  no_written_contract: '未签书面合同',
+  overtime_pay: '加班费与工时',
+  illegal_penalty: '违法约定违约金',
+  deposit_guarantee: '押金与扣押证件',
 }
 
 type TagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'

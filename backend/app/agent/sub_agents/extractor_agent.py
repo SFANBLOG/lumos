@@ -22,17 +22,23 @@ EXTRACTOR_SYSTEM_PROMPT = """\
 
 1. **纠错**: OCR 识别可能存在错别字、错误标点、段落断裂等问题，请修正这些错误。
 2. **结构化提取**: 将合同文本拆分为独立的条款，每条包含标题和内容。
-3. **初步分类**: 判断每条条款是否涉及以下 10 类风险，如果涉及请标注分类:
+3. **初步分类**: 判断每条条款是否涉及以下 16 类风险，如果涉及请标注分类:
    - non_compete: 竞业禁止/竞业限制
    - probation_salary: 试用期薪资
    - probation_insurance: 试用期社保
    - salary_deduction: 扣薪/罚款条款
    - job_description: 岗位职责/工作内容
    - obedience_clause: 服从安排/无条件调岗
-   - resignation: 离职/辞职条件
+   - resignation: 离职/辞职条件 (劳动者主动辞职)
    - leave_rights: 休假/年假/病假
    - jurisdiction: 争议管辖/仲裁地
    - training_bond: 培训服务期/违约金
+   - unlawful_termination: 用人单位违法解除/终止合同 (未支付 2N 赔偿金、解除程序违法)
+   - severance_pay: 经济补偿金 (N/N+1) 的支付情形与计算标准
+   - no_written_contract: 未订立书面劳动合同 (二倍工资)
+   - overtime_pay: 加班费与工时上限 (150%/200%/300%)
+   - illegal_penalty: 违法约定由劳动者承担违约金
+   - deposit_guarantee: 押金/扣押证件/要求担保
 
 ## 输出格式要求:
 请严格以 JSON 数组的形式输出，每个元素包含:

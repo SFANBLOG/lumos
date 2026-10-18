@@ -54,6 +54,23 @@ _REVIEWER_JSON = """{
   "summary": "合同存在竞业限制补偿过低与违约金畸高的高风险条款。"
 }"""
 
+_REVIEWER_JSON_MEDIUM = """{
+  "risks": [
+    {
+      "category": "non_compete",
+      "level": "medium",
+      "title": "竞业限制补偿金偏低",
+      "original_clause": "乙方在职期间及离职后两年内，不得从事与甲方有竞争关系的业务，甲方每月支付竞业补偿金 1000 元；乙方违反约定的，应向甲方支付违约金 50 万元。",
+      "explanation": "竞业限制期限内应按月给予经济补偿，未约定补偿的竞业限制条款存在被认定无效的风险。",
+      "legal_basis": "《劳动合同法》第二十三条",
+      "score": 65
+    }
+  ],
+  "overall_score": 68,
+  "overall_level": "medium",
+  "summary": "合同整体风险中等，竞业限制补偿偏低。"
+}"""
+
 
 def _law_refs(article: str) -> dict:
     return {
@@ -141,6 +158,7 @@ class TestWorkflowGraph:
         assert st.overall_level.value == "high"
 
     def test_events_timeline_protocol(self, fake_llm, fake_mcp, sample_state) -> None:
+        """高风险样本触发 human-in-the-loop: 分析完成后挂起等待审批 (不发 SUMMARY/COMPLETE)."""
         events = _collect(
             run_contract_analysis(contract_id=sample_state.contract_id, raw_text=sample_state.raw_text)
         )
@@ -155,18 +173,43 @@ class TestWorkflowGraph:
             SSEEventType.RISK_FOUND,   # 风险逐条上屏 (reviewer 之后)
             SSEEventType.NODE_START,   # negotiator
             SSEEventType.NODE_COMPLETE,
-            SSEEventType.SUMMARY,
-            SSEEventType.COMPLETE,
+            SSEEventType.AWAITING_REVIEW,  # 高风险: 流程挂起等待人工审批
         ]
         # RISK_FOUND 载荷与风险条目一致
         risk_event = next(e for e in events if e.event == SSEEventType.RISK_FOUND)
         assert risk_event.data["category"] == "non_compete"
         assert risk_event.data["level"] == "high"
+        # AWAITING_REVIEW 携带风险摘要, 供审批页展示 (挂起态不再发 SUMMARY/COMPLETE)
+        review_event = next(e for e in events if e.event == SSEEventType.AWAITING_REVIEW)
+        assert review_event.data["overall_level"] == "high"
+        assert review_event.data["risk_count"] == 1
+
+    def test_events_timeline_normal_flow_publishes_summary(
+        self, fake_mcp, sample_state, monkeypatch
+    ) -> None:
+        """非高风险样本不挂起, 正常发布 SUMMARY/COMPLETE (human-in-the-loop 不拦截低危)."""
+        async def _medium_reviewer(
+            self: BaseAgent, user_message: str, *, temperature: float | None = None, max_tokens: int = 4096
+        ) -> str:
+            if self.name == "extractor":
+                return _EXTRACTOR_JSON
+            if self.name == "reviewer":
+                return _REVIEWER_JSON_MEDIUM
+            raise AssertionError(f"意外调用 LLM 的节点: {self.name}")
+
+        monkeypatch.setattr(BaseAgent, "invoke_llm", _medium_reviewer)
+        events = _collect(
+            run_contract_analysis(contract_id=sample_state.contract_id, raw_text=sample_state.raw_text)
+        )
+        seq = [e.event for e in events]
+        assert SSEEventType.AWAITING_REVIEW not in seq
+        assert seq[-2] == SSEEventType.SUMMARY
+        assert seq[-1] == SSEEventType.COMPLETE
         # SUMMARY 汇总口径
         summary = next(e for e in events if e.event == SSEEventType.SUMMARY)
         assert summary.data["total_clauses"] == 2
         assert summary.data["total_risks"] == 1
-        assert summary.data["overall_score"] == 45
+        assert summary.data["overall_score"] == 68
 
     def test_node_error_emits_thinking_and_finishes(
         self, monkeypatch, fake_llm, fake_mcp

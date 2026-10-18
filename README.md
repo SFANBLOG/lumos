@@ -44,8 +44,8 @@
 
 | 能力 | 说明 |
 |---|---|
-| **十大坑点智能检测** | 深度适配中国劳动法，自动扫描竞业禁止、试用期不缴社保、变相扣薪、含糊岗位职责、苛刻离职审批等 **10 类风险条款** |
-| **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取；PDF/Word 同样支持，**扫描版/混排版 PDF 逐页自动 OCR**（无文字层的页渲染位图后识别） |
+| **智能风险检测** | 深度适配中国劳动法，自动扫描竞业禁止、试用期不缴社保、变相扣薪、含糊岗位职责、苛刻离职审批、违法解除未付赔偿金、未签书面合同、加班费等 **16 类风险条款**（初版十大坑点 + 劳动仲裁高发案由扩充 6 类） |
+| **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取；PDF/Word 同样支持，**扫描版/混排版 PDF 逐页自动 OCR**（无文字层的页渲染位图后识别），并支持 **跨页表格自动检测与合并**（见下） |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
 | **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
@@ -412,7 +412,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **43 条 pytest 用例**（默认跑 41 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层（见 `backend/tests/`）；
+- 当前 **134 条 pytest 用例**（默认跑 132 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（含 human-in-the-loop 高风险挂起分支）、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、**PDF 跨页表格检测与合并**（行切分 / 块识别 / 五类合并信号含版面 y 坐标连续性 / Tesseract 词框聚区 / 链式合并 / 列数补齐 / 独立表不误合并，见 `backend/tests/test_table_merge.py`）、**风险类别接线一致性守卫**（见 `backend/tests/test_risk_categories.py`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -476,6 +476,8 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `RETRIEVAL_MIN_SIMILARITY` | `0.05` | 精排后 `final_score` 低于该阈值的命中被过滤 |
 | 视觉 OCR | `LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL` / `LLM_VISION_MODEL_NAME` | qwen-vl / DashScope | 图片文字抽取（未配置时回退 Tesseract） |
 | | `IMAGE_OCR_STRATEGY` | `auto` | `auto` \| `llm` \| `tesseract` |
+| PDF 解析 | `PDF_CROSS_PAGE_TABLE_MERGE` | `true` | 跨页表格自动检测与合并；`false` 恢复逐页独立抽取 |
+| | `PDF_LAYOUT_GEOMETRY` | `true` | 跨页判定的版面 y 坐标连续性信号；`false` 只用纯文本信号 |
 | 安全 | `API_SECRET_KEY` | （空，置空关闭鉴权） | 业务鉴权密钥 |
 | | `JWT_SECRET_KEY` | `change-me-in-production` | JWT 签名密钥 |
 | | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | Token 过期时间（7 天） |

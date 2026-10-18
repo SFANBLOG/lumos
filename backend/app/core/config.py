@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     llm_vision_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_vision_model_name: str = "qwen-vl-max-latest"
     image_ocr_strategy: str = "auto"  # auto | llm | tesseract
+    # 扫描版/文字层 PDF 的跨页表格自动检测与合并 (见 app/services/table_merge.py)
+    # 关闭后恢复"逐页独立抽取", 跨页表会被切成两张半张表
+    pdf_cross_page_table_merge: bool = True
+    # 跨页判定的"版面 y 坐标连续性"信号 (见 app/services/table_layout.py)
+    # 开: 有文字层页用 PyMuPDF 矢量线框, 扫描页复用已渲染位图跑 Tesseract 词框;
+    # 关: 只用纯文本信号 (表头/列数/截断/表题)。几何拿不到时也会自动退回纯文本
+    pdf_layout_geometry: bool = True
 
     # ── 安全 ──────────────────────────────────────────────────
     api_secret_key: str = ""

@@ -179,6 +179,12 @@ const categoryLabels = new Set([
   'leave_rights',
   'jurisdiction',
   'training_bond',
+  'unlawful_termination',
+  'severance_pay',
+  'no_written_contract',
+  'overtime_pay',
+  'illegal_penalty',
+  'deposit_guarantee',
 ])
 
 const formValid = computed(() => {

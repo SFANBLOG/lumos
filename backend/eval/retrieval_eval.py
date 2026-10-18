@@ -50,6 +50,14 @@ _CATEGORY_DIRS: dict[str, str] = {
     "休假权益": "leave_rights",
     "管辖地争议": "jurisdiction",
     "培训服务期": "training_bond",
+    # 扩充 6 类 (劳动仲裁高发案由); 目前 data/contracts 下尚无对应样本目录,
+    # load_goldens 会因找不到目录而跳过, 不影响既有的 9 类金标准。
+    "违法解除": "unlawful_termination",
+    "经济补偿金": "severance_pay",
+    "未签书面合同": "no_written_contract",
+    "加班费": "overtime_pay",
+    "违法违约金": "illegal_penalty",
+    "押金扣押证件": "deposit_guarantee",
 }
 
 #: 各类别的文本触发词 (用于从合同样本中定位风险句)
@@ -63,6 +71,12 @@ _TRIGGERS: dict[str, list[str]] = {
     "leave_rights": ["休假", "年假", "婚假", "产假", "病假", "加班", "休息", "假日"],
     "jurisdiction": ["管辖", "仲裁", "法院", "诉讼", "争议解决"],
     "training_bond": ["培训", "服务期", "培训费", "深造", "学费", "违约金"],
+    "unlawful_termination": ["违法解除", "违法终止", "辞退", "开除", "解雇", "赔偿金", "解除劳动"],
+    "severance_pay": ["经济补偿", "经济补偿金", "补偿金", "代通知金", "一个月工资"],
+    "no_written_contract": ["未签", "未订立", "书面劳动合同", "二倍工资", "双倍工资", "事实劳动关系"],
+    "overtime_pay": ["加班", "加班费", "延长工作时间", "值班", "调休", "工时"],
+    "illegal_penalty": ["违约金", "由劳动者承担", "提前离职", "赔偿责任"],
+    "deposit_guarantee": ["押金", "保证金", "扣押", "证件", "担保", "收取财物", "档案"],
 }
 
 _SENTENCE_SPLIT = re.compile(r"[。；;！？\n\r]+")

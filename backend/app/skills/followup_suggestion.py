@@ -47,6 +47,30 @@ _FOLLOWUPS: dict[RiskCategory, list[str]] = {
         "服务期违约金超过培训费，超出的部分要付吗？",
         "什么才算『专项培训费用』？普通入职培训算吗？",
     ],
+    RiskCategory.UNLAWFUL_TERMINATION: [
+        "公司辞退我但没给赔偿金，违法解除能主张2N吗？",
+        "被以『不胜任工作』辞退，公司走完调岗或培训程序了吗？",
+    ],
+    RiskCategory.SEVERANCE_PAY: [
+        "经济补偿金按什么基数算？包含奖金和补贴吗？",
+        "公司说只给一个月补偿，工作3年应该怎么算？",
+    ],
+    RiskCategory.NO_WRITTEN_CONTRACT: [
+        "入职半年了还没签书面合同，能主张二倍工资吗？",
+        "没签合同怎么证明劳动关系？工资流水和考勤算证据吗？",
+    ],
+    RiskCategory.OVERTIME_PAY: [
+        "加班费按基本工资算还是按全额工资算？",
+        "公司用『调休』代替加班费，休息日加班可以这样吗？",
+    ],
+    RiskCategory.ILLEGAL_PENALTY: [
+        "合同里约定我提前离职要付违约金，这条有效吗？",
+        "除服务期和竞业限制外，还有哪些违约金是违法的？",
+    ],
+    RiskCategory.DEPOSIT_GUARANTEE: [
+        "入职要交押金或扣押毕业证，公司这样做违法吗？",
+        "离职时公司扣着档案不给转，我该怎么维权？",
+    ],
 }
 
 _FALLBACK: list[str] = [

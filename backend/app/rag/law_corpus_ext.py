@@ -115,6 +115,13 @@ PERSONAL_INFO_PROTECTION_LAW: list[dict] = [
 ]
 
 # ── 汇总扩展条文 ────────────────────────────────────────────────
+#
+# 注意: _load_full_corpus() 按 (law_name, article) 去重且**保留首次出现**,
+# 而本模块的扩展条文是追加在 data/*.json 之后的, 因此凡是与完整 JSON
+# 重复的条文都会被丢弃。本模块只应放 JSON 里**没有**的条文。
+# 扩充 6 类仲裁高发案由所需的《劳动合同法》《劳动法》条文在 JSON 中均已
+# 存在, 只是原先分类标注不准 (如第87条违法解除二倍赔偿金被标成
+# resignation), 已通过 scripts/recategorize_laws.py 就地修正。
 
 EXTENDED_RULES: list[dict] = (
     LABOR_LAW_EXT
