@@ -411,7 +411,9 @@ class TestExtractPdfCrossPageTable:
         monkeypatch.setattr(
             "app.core.config.get_settings",
             lambda: types.SimpleNamespace(
-                pdf_cross_page_table_merge=False, pdf_layout_geometry=False
+                pdf_cross_page_table_merge=False,
+                pdf_layout_geometry=False,
+                pdf_column_aware_extract=False,
             ),
         )
 

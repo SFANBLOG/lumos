@@ -30,7 +30,14 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-__all__ = ["TableRegion", "x_aligned", "extract_pdf_layout", "regions_from_image"]
+__all__ = [
+    "TableRegion",
+    "x_aligned",
+    "extract_pdf_layout",
+    "regions_from_image",
+    "detect_columns_from_blocks",
+    "reorder_blocks_by_columns",
+]
 
 #: 距页边多少比例以内算"贴页边" (用于判定表是否顶到页尾/页首)
 _EDGE_RATIO = 0.08
@@ -303,3 +310,120 @@ def extract_pdf_layout(
         doc.close()
 
     return layout
+
+
+# ─── 同页多栏 (双栏/分栏) 检测与重排 ──────────────────────────
+#
+# 双栏/分栏排版的页面, 纯文本抽取 (pypdf / Tesseract 默认顺序) 会按 y 坐标把
+# 左栏与右栏的文本逐行交错输出, 导致"同栏内的表格"被另一栏的正文行切断、
+# 表格行不再连续。解决办法: 先检测栏边界, 再按"先栏后 y"的顺序重组文本块。
+#
+# 这里只依赖文本块的 bbox (x0/x1/y0 与文本), 不依赖 OCR 逐行对齐, 因此
+# 可同时服务于"有文字层页 (PyMuPDF blocks)"与"扫描页 (Tesseract 词框聚合
+# 出的行块)"两种来源 —— 调用方把各自的 (x0,y0,x1,y1,text) 块喂进来即可。
+
+
+#: 判定"栏间空档"的最小宽度 (占子区间宽度比例)
+_MIN_GAP_RATIO = 0.08
+
+#: 过滤掉过窄的列 (占子区间宽度比例), 避免把单栏内的局部空隙误切成多列
+_MIN_COL_RATIO = 0.10
+
+#: 最多切分出的栏数 (防止噪声把页面切成碎列)
+_MAX_COLS = 4
+
+
+def detect_columns_from_blocks(
+    text_blocks: list,
+    page_width: float,
+    max_cols: int = _MAX_COLS,
+) -> list[tuple[float, float]]:
+    """
+    从文本块 (fitz block 元组: (x0,y0,x1,y1,text,block_no,block_type)) 聚类出
+    栏边界 ``[(x0,x1), ...]`` (按 x 升序).
+
+    算法: 把块的 x 跨度投影到一维, 在"覆盖为空"的最大空档处切一刀, 递归切分
+    直到无足够大的空档或达到 max_cols。单栏页面返回 ``[(0, page_width)]``。
+    """
+    if not text_blocks or page_width <= 0:
+        return [(0.0, page_width)]
+
+    def _rec(blocks: list, lo: float, hi: float, depth: int) -> list[tuple[float, float]]:
+        width = hi - lo
+        if width <= 0 or len(blocks) < 2 or depth >= max_cols - 1:
+            return [(lo, hi)]
+
+        spans = [(max(lo, b[0]), min(hi, b[2])) for b in blocks]
+        nbins = max(20, int(width / page_width * 200))
+        cov = [0] * nbins
+        for x0, x1 in spans:
+            a = max(0, min(nbins - 1, int((x0 - lo) / width * nbins)))
+            b_ = max(a, min(nbins - 1, int((x1 - lo) / width * nbins)))
+            for k in range(a, b_ + 1):
+                cov[k] += 1
+
+        # 找最大空档
+        best = None
+        i = 0
+        while i < nbins:
+            if cov[i] == 0:
+                j = i
+                while j < nbins and cov[j] == 0:
+                    j += 1
+                gap_len = (j - i) / nbins
+                if best is None or gap_len > best[2]:
+                    best = (i, j, gap_len)
+                i = j
+            else:
+                i += 1
+
+        if best is None or best[2] < _MIN_GAP_RATIO:
+            return [(lo, hi)]
+
+        gi, gj, _ = best
+        cut = lo + (gi + gj) / 2 / nbins * width
+        left = [b for b in blocks if (b[0] + b[2]) / 2 <= cut]
+        right = [b for b in blocks if (b[0] + b[2]) / 2 > cut]
+        if not left or not right:
+            return [(lo, hi)]
+
+        cols = _rec(left, lo, cut, depth + 1) + _rec(right, cut, hi, depth + 1)
+        cols = [(c0, c1) for c0, c1 in cols if (c1 - c0) >= _MIN_COL_RATIO * width]
+        if len(cols) <= 1:
+            return [(lo, hi)]
+        cols.sort()
+        return cols
+
+    return _rec(text_blocks, 0.0, page_width, 0)
+
+
+def reorder_blocks_by_columns(
+    text_blocks: list,
+    columns: list[tuple[float, float]],
+) -> list[str]:
+    """
+    按"先栏后 y (再 x)"的顺序重排文本块, 返回重排后的文本列表.
+
+    ``text_blocks`` 元素同 ``detect_columns_from_blocks``; ``columns`` 为其输出。
+    单栏 (len(columns) <= 1) 时退化为按 (y, x) 排序, 不改变原有阅读顺序。
+    """
+    if not text_blocks:
+        return []
+
+    if len(columns) <= 1:
+        ordered = sorted(text_blocks, key=lambda b: (b[1], b[0]))
+        return [b[4] for b in ordered]
+
+    def _col_of(block: object) -> int:
+        cx = (block[0] + block[2]) / 2
+        for idx, (c0, c1) in enumerate(columns):
+            if c0 <= cx <= c1:
+                return idx
+        # 不在任何列中心区间内 → 取最近列
+        return min(
+            range(len(columns)),
+            key=lambda i: abs((columns[i][0] + columns[i][1]) / 2 - cx),
+        )
+
+    ordered = sorted(text_blocks, key=lambda b: (_col_of(b), b[1], b[0]))
+    return [b[4] for b in ordered]

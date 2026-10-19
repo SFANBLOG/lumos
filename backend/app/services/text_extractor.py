@@ -53,6 +53,11 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
             text = ""
         page_texts.append(text)
 
+    # 同页多栏(双栏/分栏)栏感知抽取: 对有文字层的多栏页按"先栏后 y"重组,
+    # 避免跨栏文本把同栏内的表格行切断; 单栏/无 PyMuPDF 时不改动
+    if getattr(settings, "pdf_column_aware_extract", False):
+        page_texts = _apply_column_aware_extract(data, page_texts)
+
     # 无文字层 (需 OCR) 的页索引
     blank_idx = [i for i, t in enumerate(page_texts) if not t.strip()]
     pixmaps: dict[int, bytes] = {}
@@ -138,6 +143,54 @@ def _looks_like_table_page(text: str) -> bool:
     from app.services.table_merge import split_row
 
     return any(split_row(line) for line in text.split("\n"))
+
+
+def _extract_page_column_aware(page) -> str | None:
+    """用 PyMuPDF blocks 对单页做栏感知抽取; 单栏/异常返回 None (调用方回退)."""
+    try:
+        blocks = page.get_text("blocks")
+    except Exception:
+        return None
+    text_blocks = [
+        b for b in blocks
+        if len(b) >= 7 and b[6] == 0 and (b[4] or "").strip()
+    ]
+    if not text_blocks:
+        return None
+    rect = getattr(page, "rect", None)
+    page_width = float(getattr(rect, "width", 0) or 0)
+    if page_width <= 0:
+        return None
+    from app.services.table_layout import (
+        detect_columns_from_blocks,
+        reorder_blocks_by_columns,
+    )
+
+    columns = detect_columns_from_blocks(text_blocks, page_width)
+    if len(columns) <= 1:
+        return None  # 单栏: 回退原抽取, 避免两种引擎的文本差异
+    return "\n".join(reorder_blocks_by_columns(text_blocks, columns))
+
+
+def _apply_column_aware_extract(data: bytes, page_texts: list[str]) -> list[str]:
+    """对有文字层的多栏页用栏感知结果覆盖, 其余页保持不变."""
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return page_texts
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+    except Exception:
+        return page_texts
+    try:
+        for idx in range(min(doc.page_count, len(page_texts))):
+            if page_texts[idx].strip():
+                col = _extract_page_column_aware(doc[idx])
+                if col is not None:
+                    page_texts[idx] = col
+    finally:
+        doc.close()
+    return page_texts
 
 
 # ─── DOCX ──────────────────────────────────────────────────────

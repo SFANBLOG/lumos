@@ -412,7 +412,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **134 条 pytest 用例**（默认跑 132 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（含 human-in-the-loop 高风险挂起分支）、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、**PDF 跨页表格检测与合并**（行切分 / 块识别 / 五类合并信号含版面 y 坐标连续性 / Tesseract 词框聚区 / 链式合并 / 列数补齐 / 独立表不误合并，见 `backend/tests/test_table_merge.py`）、**风险类别接线一致性守卫**（见 `backend/tests/test_risk_categories.py`）；
+- 当前 **143 条 pytest 用例**（默认跑 141 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复（含 human-in-the-loop 高风险挂起分支）、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、**同页多栏（双栏/分栏）栏感知抽取**（先检测栏边界再按「先栏后 y」重组，避免跨栏文本把同栏表格行切断，见 `backend/tests/test_column_layout.py`）、**PDF 跨页表格检测与合并**（行切分 / 块识别 / 五类合并信号含版面 y 坐标连续性 / Tesseract 词框聚区 / 链式合并 / 列数补齐 / 独立表不误合并，见 `backend/tests/test_table_merge.py`）、**风险类别接线一致性守卫**（见 `backend/tests/test_risk_categories.py`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）

@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # 开: 有文字层页用 PyMuPDF 矢量线框, 扫描页复用已渲染位图跑 Tesseract 词框;
     # 关: 只用纯文本信号 (表头/列数/截断/表题)。几何拿不到时也会自动退回纯文本
     pdf_layout_geometry: bool = True
+    # 同页多栏(双栏/分栏)的栏感知抽取: 检测栏边界后按"先栏后 y"重组文本块,
+    # 避免跨栏文本把同栏内的表格行切断; 仅对"检测到多栏"的页启用, 单栏/无
+    # PyMuPDF 时完全走原抽取路径, 不会退化
+    pdf_column_aware_extract: bool = True
 
     # ── 安全 ──────────────────────────────────────────────────
     api_secret_key: str = ""

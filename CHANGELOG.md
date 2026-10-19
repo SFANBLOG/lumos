@@ -25,6 +25,14 @@
 - ⚙️ 新增配置项 `PDF_CROSS_PAGE_TABLE_MERGE` / `PDF_LAYOUT_GEOMETRY`（默认均开），可分别退回逐页独立抽取与纯文本判定
 - 🧪 新增 24 条用例，含「无表格时输出与改造前逐字节一致」的回归守卫
 
+### 📄 同页多栏（双栏/分栏）栏感知抽取
+
+- 🐛 **修复同页多栏排版把表格行切断**：双栏/分栏页纯文本抽取按 y 坐标把左栏与右栏逐行交错输出，同栏内的表格被另一栏正文行打断、表格行不再连续
+- 🧩 `table_layout.py` 新增 `detect_columns_from_blocks`（文本块 x 跨度投影找最大空档，递归切分出栏边界）与 `reorder_blocks_by_columns`（按「先栏后 y 再 x」重组文本块）
+- 🔌 `text_extractor.extract_pdf` 集成：仅对「检测到多栏」的页用 PyMuPDF blocks 栏感知结果覆盖，单栏/无 PyMuPDF 时完全走原抽取路径，零退化
+- ⚙️ 新增配置项 `PDF_COLUMN_AWARE_EXTRACT`（默认开）
+- 🧪 新增 `tests/test_column_layout.py`：栏检测/重排纯函数 + fitz 构造双栏 PDF 的端到端验证（开启时左栏整体排在右栏前，单栏开关不影响输出）
+
 ### 🏷️ 风险类别从 10 类扩充至 16 类
 
 - ➕ 新增 6 类劳动仲裁高发案由：`unlawful_termination`（违法解除/2N 赔偿金）、`severance_pay`（经济补偿金 N）、`no_written_contract`（未签书面合同二倍工资）、`overtime_pay`（加班费与工时）、`illegal_penalty`（违法约定违约金）、`deposit_guarantee`（押金/扣押证件/担保）
