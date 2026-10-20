@@ -146,7 +146,10 @@ class TestWorkflowGraph:
 
         graph = build_contract_graph()
         raw = asyncio.run(
-            graph.ainvoke(AgentState(contract_id="g-1", raw_text=_CONTRACT_TEXT))
+            graph.ainvoke(
+                AgentState(contract_id="g-1", raw_text=_CONTRACT_TEXT),
+                config={"configurable": {"thread_id": "g-1"}},
+            )
         )
         st = raw if isinstance(raw, AgentState) else AgentState(**raw)
         assert st.agent_trace == ["extractor", "retriever", "reviewer", "negotiator"]

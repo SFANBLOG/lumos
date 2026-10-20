@@ -24,6 +24,7 @@ from functools import lru_cache
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,24 +104,85 @@ def _node_action(agent: BaseAgent, idx: int, total: int) -> Any:
     return action
 
 
+def _review_gate(state: AgentState) -> dict[str, Any]:
+    """人工介入闸门: 高风险或含待复核项时 ``interrupt()`` 挂起, 否则放行至 END.
+
+    ``interrupt`` 会暂停图执行并把状态落盘 (checkpointer); 审批通过后以相同
+    ``thread_id`` 续跑至此节点, ``interrupt()`` 立即返回, 节点返回空更新使图走到 END。
+    """
+    needs_review = bool(state.quality_issues) or state.overall_level == RiskLevel.HIGH
+    if needs_review:
+        interrupt(
+            {
+                "contract_id": state.contract_id,
+                "overall_level": state.overall_level.value,
+                "risk_count": len(state.risk_assessments),
+                "quality_issues": state.quality_issues,
+                "message": "⏸️ 存在待人工复核项或高风险，流程已挂起等待审批",
+            }
+        )
+    return {}
+
+
 @lru_cache
 def build_contract_graph() -> Any:
-    """构建并编译 LangGraph 合同审查图 (进程级缓存)."""
+    """构建并编译 LangGraph 合同审查图 (进程级缓存).
+
+    接入 checkpointer 后支持中断续跑/重放: 高风险或含待复核项的合同会在
+    ``review_gate`` 节点被 ``interrupt()`` 挂起, 状态落盘 (Postgres/Memory),
+    审批通过后用同一 ``thread_id`` 续跑至 END。
+    """
     total = len(_NODE_SEQ)
     graph = StateGraph(AgentState)
     for idx, (name, _description) in enumerate(_NODE_SEQ):
         graph.add_node(name, _node_action(_AGENTS[name], idx, total))
 
+    # 人工介入闸门: 分析完成后判断是否需要挂起等待审批
+    graph.add_node("review_gate", _review_gate)
     graph.add_edge(START, _NODE_SEQ[0][0])
     for i in range(total - 1):
         graph.add_edge(_NODE_SEQ[i][0], _NODE_SEQ[i + 1][0])
-    graph.add_edge(_NODE_SEQ[-1][0], END)
+    graph.add_edge(_NODE_SEQ[-1][0], "review_gate")
+    graph.add_edge("review_gate", END)
 
-    compiled = graph.compile()
+    compiled = graph.compile(checkpointer=get_checkpointer())
     logger.info(
-        f"🕸️ LangGraph 工作流就绪 | 节点: {[n for n, _ in _NODE_SEQ]}"
+        f"🕸️ LangGraph 工作流就绪 | 节点: {[n for n, _ in _NODE_SEQ] + ['review_gate']}"
     )
     return compiled
+
+
+def get_checkpointer() -> Any:
+    """按配置返回 LangGraph checkpointer (Postgres 持久化 / Memory 进程内).
+
+    后端由 ``checkpoint_backend`` 决定; Postgres 基于 psycopg 的 AsyncPostgresSaver
+    (LangGraph 官方实现), 缺依赖或 memory 模式时回退 MemorySaver, 保证无 Postgres
+    环境 (如单测) 仍可运行。
+    """
+    from app.core.config import get_settings
+
+    backend = getattr(get_settings(), "checkpoint_backend", "postgres")
+    if backend == "memory":
+        from langgraph.checkpoint.memory import MemorySaver
+
+        return MemorySaver()
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        return AsyncPostgresSaver.from_conn_string(get_settings().checkpoint_postgres_dsn)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"⚠️ Postgres checkpointer 不可用, 回退 MemorySaver: {e}")
+        from langgraph.checkpoint.memory import MemorySaver
+
+        return MemorySaver()
+
+
+async def setup_checkpointer() -> None:
+    """异步建表 (仅 Postgres 需要; MemorySaver 无 setup). 由 lifespan 启动时调用."""
+    cp = get_checkpointer()
+    setup = getattr(cp, "setup", None)
+    if setup is not None:
+        await setup()
 
 
 def _start_event(idx: int, total: int) -> SSEEvent:
@@ -151,6 +213,7 @@ async def run_contract_analysis(
     logger.info(f"🚀 Agent 工作流启动 (LangGraph) | 合同ID: {contract_id}")
 
     graph = build_contract_graph()
+    config = {"configurable": {"thread_id": contract_id}}
     initial = AgentState(contract_id=contract_id, raw_text=raw_text)
     total = len(_NODE_SEQ)
 
@@ -161,7 +224,7 @@ async def run_contract_analysis(
     emitted = 0
     completed = 0
     try:
-        async for raw in graph.astream(initial, stream_mode="values"):
+        async for raw in graph.astream(initial, config=config, stream_mode="values"):
             if completed == 0 and emitted == 0 and raw == initial.model_dump():
                 continue  # astream 首项为初始状态快照
             state = AgentState(**raw)
@@ -185,9 +248,10 @@ async def run_contract_analysis(
         )
         return
 
-    # 全图完成: 判断是否需要人工介入 (待复核项 或 高风险)
-    needs_review = bool(final_state.quality_issues) or final_state.overall_level == RiskLevel.HIGH
-    if needs_review:
+    # 图是否已中断挂起 (review_gate 触发 interrupt, next 非空即暂停等待审批)
+    snap = await graph.aget_state(config)
+    if snap.next:
+        final_state = AgentState(**snap.values)
         if session is not None:
             await _save_snapshot_and_create_approval(contract_id, final_state, session)
         reasons = list(final_state.quality_issues)
@@ -206,6 +270,7 @@ async def run_contract_analysis(
         )
         return
 
+    # 正常完成 (无中断): 落库并发布
     if session is not None:
         await _persist(final_state, session)
 
@@ -295,21 +360,34 @@ async def _save_snapshot_and_create_approval(
     )
 
 
-async def publish_after_review(
+async def resume_contract_analysis(
     contract_id: str,
-    snapshot: dict[str, Any] | str,
     session: AsyncSession | None = None,
 ) -> AsyncGenerator[SSEEvent, None]:
-    """审批通过后发布: 从快照恢复状态, 落库分析结果并推送 SUMMARY/COMPLETE 事件."""
-    data: dict[str, Any] = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
-    state_fields = {k: v for k, v in data.items() if k in AgentState.model_fields}
-    state = AgentState.model_validate(state_fields)
+    """审批通过后从 checkpoint 续跑至 END 并发布 (LangGraph 原生 resume).
 
+    与首跑共享同一 ``thread_id``; 图从中断点 (review_gate 的 ``interrupt`` 之后)
+    继续, 回到 END 后落库并推送 SUMMARY/COMPLETE。无需再从 JSON 快照重建状态。
+    """
+    graph = build_contract_graph()
+    config = {"configurable": {"thread_id": contract_id}}
+    try:
+        raw = await graph.ainvoke(None, config=config)
+    except Exception as e:
+        logger.exception(f"❌ LangGraph 续跑异常 | 合同ID: {contract_id}")
+        yield SSEEvent(
+            event=SSEEventType.ERROR,
+            data={"message": f"续跑失败: {e}"},
+        )
+        return
+
+    state = AgentState(**raw)
     if session is not None:
         await _persist(state, session)
         contract = await session.get(Contract, contract_id)
         if contract is not None:
             contract.status = ContractStatus.COMPLETED
+            contract.analysis_snapshot = None  # 已发布, 清空挂起快照
             contract.updated_at = datetime.now(UTC)
             session.add(contract)
             await session.commit()

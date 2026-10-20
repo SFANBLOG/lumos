@@ -18,6 +18,8 @@ dependencies = [
     # ---- AI / Agent ----
     "langchain-openai>=0.3.0",
     "langgraph>=0.2.60",  # 合同审查工作流 StateGraph 编排
+    "langgraph-checkpoint-postgres>=2.0.0",  # 断点续跑 checkpointer (Postgres 持久化)
+    "psycopg[binary]>=3.1.0",  # Postgres 异步驱动 (LangGraph PostgresSaver 基于 psycopg)
 
     # ---- RAG & Document ----
     "pymilvus>=2.4.0",

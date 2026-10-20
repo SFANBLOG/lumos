@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # 是否回显执行 SQL (调试用; 默认关闭, 避免控制台/日志被 SELECT 刷屏)
     database_echo: bool = False
 
+    # ── LangGraph 断点续跑 checkpointer ──────────────────────
+    # 工作流状态持久化后端: postgres (AsyncPostgresSaver, 生产, 支持中断续跑/重放)
+    #                      | memory  (进程内存, 重启丢失, 仅用于本地/测试)
+    # 切到 memory 可零依赖验证断点续跑机制; 生产务必用 postgres
+    checkpoint_backend: str = "postgres"
+    # Postgres 连接串 (psycopg 格式); 仅 checkpoint_backend=postgres 时使用。
+    # 注: LangGraph PostgresSaver 基于 psycopg (非 asyncpg), 需 psycopg[binary] 依赖
+    checkpoint_postgres_dsn: str = "postgresql://lumos:lumos@localhost:5432/lumos"
+
     # ── AI 模型 ───────────────────────────────────────────────
     llm_api_key: str = ""
     llm_base_url: str = "https://api.deepseek.com/v1"

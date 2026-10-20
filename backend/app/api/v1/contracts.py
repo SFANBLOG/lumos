@@ -21,7 +21,7 @@ from sqlmodel import select
 from app.api.deps import AuthAny, DBSession
 from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
-from app.agent.graph import publish_after_review
+from app.agent.graph import resume_contract_analysis
 from app.services import analysis_task
 from app.services.audit import record_audit_event
 from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse
@@ -303,7 +303,7 @@ async def resume_stream_analysis(
 
     async def event_generator():
         try:
-            async for event in publish_after_review(contract_id, contract.analysis_snapshot, session):
+            async for event in resume_contract_analysis(contract_id, session):
                 data = json.dumps(event.data, ensure_ascii=False)
                 yield f"event: {event.event.value}\ndata: {data}\n\n"
                 await asyncio.sleep(0.1)

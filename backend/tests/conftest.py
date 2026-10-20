@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 
+from app.core.config import get_settings
 from app.core.database import get_session
 from app.main import create_app
 
@@ -93,3 +94,19 @@ async def client(async_session: AsyncSession) -> AsyncGenerator[AsyncClient, Non
         headers=headers,
     ) as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _memory_checkpointer(monkeypatch) -> None:
+    """测试环境无 Postgres: 强制 LangGraph checkpointer 走内存后端, 避免连库失败.
+
+    生产默认 postgres 不受影响 (由部署环境 settings 控制); 这里只为了让带
+    checkpointer 的图在单测中可运行 (中断/续跑机制与后端无关)。
+    """
+    from app.agent.graph import build_contract_graph
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "checkpoint_backend", "memory")
+    build_contract_graph.cache_clear()
+    yield
+    build_contract_graph.cache_clear()
