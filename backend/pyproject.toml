@@ -23,6 +23,7 @@ dependencies = [
 
     # ---- RAG & Document ----
     "pymilvus>=2.4.0",
+    "chromadb>=0.5.0",  # 向量通道 Milvus 的本地降级备库 (嵌入式, 零外部依赖)
     "sentence-transformers>=3.0.0",  # 本地 embedding 模型 (默认 provider=local, 首次缺失自动下载)
     "rank-bm25>=0.2.2",  # BM25 全文检索 (混合检索关键词通道)
     "jieba>=0.42.1",  # 中文分词 (BM25 索引构建)

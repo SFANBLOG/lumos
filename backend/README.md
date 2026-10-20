@@ -22,7 +22,7 @@ flowchart LR
 - **LLM**：LangChain `ChatOpenAI`（OpenAI 兼容接口：DeepSeek / Claude / 通义千问等）
 - **RAG 检索**（`app/rag/`）：
   - embedding：`sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维）或 API embedding，双通道可切换
-  - 向量库：Milvus（COSINE；集合名 = 基名 + embedding 签名哈希，换模型自动隔离重建；不可用时向量通道关闭，仅剩 BM25）
+  - 向量库：Milvus（主库，COSINE；集合名 = 基名 + embedding 签名哈希，换模型自动隔离重建）；本地嵌入式 **Chroma** 作为降级备库 —— Milvus 不可用时自动降级到 Chroma 兜底语义检索（仍为向量召回，而非退化为仅 BM25）；两者均不可用向量通道才关闭，仅剩 BM25
   - 关键词通道：BM25（rank-bm25 + jieba 中文分词，领域词典）
   - 融合：Reciprocal Rank Fusion（RRF），生产入口 `search_laws()`
   - 精排：Reranker（默认轻量可解释精排，可选 CrossEncoder `BAAI/bge-reranker-base` 语义重排 + 相似度阈值过滤），由 `search_laws()` 在 RRF 融合后内联调用
@@ -67,7 +67,8 @@ backend/
 │   │   ├── law_corpus.py   # 法条语料 (14 部法律法规完整条文) + 语料哈希
 │   │   ├── embeddings.py   # 真实 embedding 双通道 (local/api)
 │   │   ├── bm25_index.py   # BM25 关键词通道 (jieba + 领域词典)
-│   │   ├── milvus_store.py # Milvus 向量库 (COSINE/签名集合隔离)
+│   │   ├── milvus_store.py # Milvus 向量库 (主库, COSINE/签名集合隔离)
+│   │   ├── chroma_store.py # Chroma 向量库 (Milvus 降级备库, 本地嵌入式)
 │   │   ├── vector_store.py # search_laws 混合入口（双路召回 → RRF → 精排）
 │   │   ├── hybrid.py       # RRF 融合
 │   │   └── reranker.py     # 精排（可解释 / CrossEncoder）
@@ -129,7 +130,8 @@ python -m eval.retrieval_eval --topk 5
 | `EMBEDDING_MODEL_NAME` | `BAAI/bge-base-zh-v1.5` | 本地模型名（预下载到 `models/bge-base-zh-v1.5/`；未命中时经 hf-mirror 自动拉取） |
 | `HYBRID_TOP_K_RATIO` / `RRF_K` | `2` / `60` | 混合检索融合参数 |
 | `RERANKER_ENABLED` / `RERANKER_MODEL_NAME` | `false` / `BAAI/bge-reranker-base` | 精排：开启则用 CrossEncoder 语义重排，否则可解释精排 |
-| `MILVUS_HOST` / `MILVUS_PORT` | localhost / 19530 | 向量库 |
+| `MILVUS_HOST` / `MILVUS_PORT` | localhost / 19530 | 向量库（主库） |
+| `CHROMA_ENABLED` / `CHROMA_PERSIST_DIR` / `CHROMA_COLLECTION` | `true` / `data/chroma` / `lumos_laws` | 向量库降级备库（Milvus 不可用时兜底语义检索的本地嵌入式 Chroma） |
 | `DATABASE_URL` | mysql+aiomysql://... | SQLAlchemy 连接串（**不再支持 SQLite**，Docker 由 compose 注入） |
 | `DATABASE_ECHO` | `false` | 回显执行 SQL（调试用，默认关闭） |
 | `API_SECRET_KEY` | 空（鉴权关闭） | 非空时启用 X-API-Key 鉴权 |

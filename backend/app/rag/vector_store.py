@@ -2,16 +2,17 @@
 向量库管理 + 混合检索入口.
 
 检索链路 (search_laws) — 双路召回 + RRF 融合 + 精排:
-    1. 双路召回: 向量通道 Milvus (真实 embedding, COSINE)
-       + 关键词通道 BM25 全文检索 (jieba 分词, 内存索引);
+    1. 双路召回: 向量通道 (真实 embedding, COSINE) + 关键词通道 BM25 全文检索
+       (jieba 分词, 内存索引);
     2. RRF 融合: 两通道结果经 Reciprocal Rank Fusion (RRF) 融合排序,
        相关度分数 (similarity) 由两通道真实分数加权得出
        (向量权重见 hybrid_vector_weight 配置), 单通道命中打折;
     3. 精排: 融合候选经 rerank_candidates 重排 (轻量可解释精排 /
        可选 CrossEncoder 语义重排), 并按 retrieval_min_similarity 阈值过滤。
 
-向量通道唯一后端为 Milvus (非 sqlite, 无 ChromaDB 降级路径);
-Milvus 不可用时向量通道直接关闭, 仅保留 BM25 关键词检索, 应用仍可启动。
+向量通道后端: 主库 Milvus, 本地嵌入式 Chroma 作为降级备库 —— Milvus 不可用时
+自动降级到 Chroma (仍为语义向量检索, 而非退化为仅 BM25); 两者均不可用时限
+关闭向量通道, 仅保留 BM25 关键词检索, 应用仍可启动。
 所有向量均由 ``app.rag.embeddings`` 的真实模型产出。
 """
 
@@ -41,7 +42,7 @@ def _tag_channel(hit: dict, channel: str) -> dict:
     return hit
 
 
-# ── 向量通道 (仅 Milvus) ───────────────────────────────────────
+# ── 向量通道 (Milvus 主库 + Chroma 降级备库) ──────────────────
 
 
 def _vector_search(
@@ -49,7 +50,10 @@ def _vector_search(
     n_results: int,
     category: str | None,
 ) -> list[dict]:
-    """向量通道: 仅 Milvus. 任意异常均关闭向量通道 (BM25 仍可用)."""
+    """向量通道: 优先 Milvus; Milvus 不可用时降级到本地 Chroma 备库.
+
+    两者均不可用时关闭向量通道 (返回空, BM25 仍可用).
+    """
     try:
         from app.rag.milvus_store import search_milvus
 
@@ -59,8 +63,18 @@ def _vector_search(
     except EmbeddingNotReadyError:
         raise
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"Milvus 检索失败, 跳过向量通道: {e}")
-        return []
+        logger.warning(f"Milvus 检索失败, 尝试 Chroma 降级: {e}")
+        try:
+            from app.rag.chroma_store import search_chroma
+
+            hits = search_chroma(query, n_results=n_results, category=category)
+            logger.debug(f"[vector] Chroma 降级召回 {len(hits)} 条")
+            return [_tag_channel(h, "vector") for h in hits]
+        except EmbeddingNotReadyError:
+            raise
+        except Exception as e2:  # noqa: BLE001
+            logger.warning(f"Chroma 降级检索也失败, 关闭向量通道: {e2}")
+            return []
 
 
 # ── 混合检索入口 ───────────────────────────────────────────────
@@ -122,7 +136,7 @@ def search_laws(
 
 
 def init_vector_store() -> None:
-    """初始化向量库 (应用启动时调用), 仅 Milvus."""
+    """初始化向量库 (应用启动时调用): Milvus 主库 + Chroma 本地降级备库."""
     try:
         # 尽早暴露 embedding 配置问题 (真实模型加载/连通性)
         from app.rag.embeddings import get_embedder
@@ -133,15 +147,27 @@ def init_vector_store() -> None:
         logger.error(f"❌ embedding 通道不可用, 语义检索将不可用: {e}")
         return
 
+    # 主库: Milvus
     try:
         from app.rag.milvus_store import init_milvus
 
         init_milvus()
-        logger.info("⚖️ Milvus 法律向量库就绪 (向量通道已启用)")
+        logger.info("⚖️ Milvus 法律向量库就绪 (向量通道主库已启用)")
     except EmbeddingNotReadyError:
         raise
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"⚠️ Milvus 不可用, 向量通道关闭, 仅保留 BM25 关键词检索: {e}")
+        logger.warning(f"⚠️ Milvus 不可用, 向量通道将由 Chroma 备库兜底: {e}")
+
+    # 降级备库: Chroma (本地嵌入式, 即使 Milvus 故障也能兜住语义检索)
+    try:
+        from app.rag.chroma_store import init_chroma
+
+        init_chroma()
+        logger.info("🧱 Chroma 本地降级备库就绪 (Milvus 故障时兜底语义检索)")
+    except EmbeddingNotReadyError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"⚠️ Chroma 备库不可用, 向量通道仅依赖 Milvus: {e}")
 
 
 # 供外部确认语料/embedding 签名 (调试用)

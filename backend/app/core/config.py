@@ -132,6 +132,13 @@ class Settings(BaseSettings):
     # 基集合名; 实际集合名 = 基名 + embedding 签名后缀, 换模型自动隔离重建
     milvus_collection: str = "labor_laws"
 
+    # ── 向量通道降级备库 (Chroma) ───────────────────────────
+    # Milvus 不可用时由本地嵌入式 Chroma (PersistentClient) 兜底语义检索,
+    # 避免退化为仅 BM25 关键词检索; 两者均不可用向量通道才关闭。
+    chroma_enabled: bool = True  # 关闭则 Milvus 故障时向量通道直接关闭 (无 Chroma 兜底)
+    chroma_persist_dir: str = "data/chroma"  # 本地持久化目录 (相对 backend 根)
+    chroma_collection: str = "lumos_laws"  # 基集合名 (实际 = 基名 + embedding 签名后缀)
+
     # ── MinIO ─────────────────────────────────────────────────
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
