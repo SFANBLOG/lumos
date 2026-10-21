@@ -101,7 +101,7 @@
 | LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → negotiate，共享 Pydantic `AgentState` |
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
-| 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
+| 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建；**启动期通道选择级降级**——首选通道不可用（本地依赖缺失 / API Key 缺失）时自动降级另一通道兜底，避免语义检索整体不可用 |
 | Milvus（主库）+ Chroma（降级备库） | 向量数据库：Milvus（COSINE，动态维度）为主库，本地嵌入式 Chroma 为降级备库；Milvus 不可用时自动降级 Chroma 兜底语义检索（仍为向量召回），两者均不可用才关闭向量通道仅保留 BM25 |
 | BM25 (jieba) | 法条语料全文关键词通道（零分未命中文档不进候选），与向量通道经 **RRF** 融合；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折） |
 | Reranker（精排） | RRF 融合候选再经 `rerank_candidates` 精排：默认轻量可解释精排（召回分 + 词覆盖 + 标题命中加权），可选 CrossEncoder（`BAAI/bge-reranker-base`）语义重排，并按相似度阈值过滤后取 Top-K |

@@ -21,7 +21,7 @@ flowchart LR
   - ExtractorAgent → RetrieverAgent → ReviewerAgent → NegotiatorAgent（+ ConsultantAgent 智能咨询）
 - **LLM**：LangChain `ChatOpenAI`（OpenAI 兼容接口：DeepSeek / Claude / 通义千问等）
 - **RAG 检索**（`app/rag/`）：
-  - embedding：`sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维）或 API embedding，双通道可切换
+  - embedding：`sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维）或 API embedding，双通道可切换；**启动期通道选择级降级**——首选通道不可用（本地依赖缺失 / API Key 缺失）时自动降级另一通道兜底，避免语义检索整体不可用
   - 向量库：Milvus（主库，COSINE；集合名 = 基名 + embedding 签名哈希，换模型自动隔离重建）；本地嵌入式 **Chroma** 作为降级备库 —— Milvus 不可用时自动降级到 Chroma 兜底语义检索（仍为向量召回，而非退化为仅 BM25）；两者均不可用向量通道才关闭，仅剩 BM25
   - 关键词通道：BM25（rank-bm25 + jieba 中文分词，领域词典）
   - 融合：Reciprocal Rank Fusion（RRF），生产入口 `search_laws()`

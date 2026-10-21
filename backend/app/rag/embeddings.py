@@ -6,6 +6,10 @@ Embedding 提供者 (真实模型, 非占位向量).
   ``BAAI/bge-base-zh-v1.5`` (768 维, 中文检索友好, 离线可用);
 - ``api``: OpenAI 兼容 ``/embeddings`` 接口 (如硅基流动 BAAI/bge-m3 等)。
 
+启动期通道选择级降级: 首选通道不可用 (本地依赖缺失 / API Key 缺失) 时,
+自动降级到另一可用通道兜底 (并告警), 避免语义检索整体不可用; 两者皆不可用
+才报错。降级会切换 embedding_signature, 触发向量索引按签名自动重建。
+
 向量库按 ``embedding_signature()`` 隔离: 切换模型/通道后索引自动重建,
 避免不同模型向量混在同一集合中导致检索失真。
 
@@ -182,38 +186,74 @@ class ApiEmbedder(EmbeddingProvider):
         return client.embed_documents(texts)
 
 
+def _local_available() -> bool:
+    """探测本地 sentence-transformers 依赖是否可用 (不加载模型)."""
+    try:
+        import sentence_transformers  # noqa: F401  # 仅探测可用性
+        return True
+    except ImportError:
+        return False
+
+
+def _build_local(model_name: str) -> LocalSentenceTransformerEmbedder:
+    if not _local_available():
+        raise EmbeddingNotReadyError(
+            "本地 embedding 依赖未安装: pip install -e '.[embedding]'"
+        )
+    return LocalSentenceTransformerEmbedder(model_name)
+
+
+def _build_api(model_name: str, base_url: str, api_key: str) -> ApiEmbedder:
+    if not api_key:
+        raise EmbeddingNotReadyError(
+            "API embedding 通道需要配置 EMBEDDING_API_KEY / "
+            "EMBEDDING_BASE_URL / EMBEDDING_MODEL_NAME"
+        )
+    return ApiEmbedder(model_name=model_name, api_key=api_key, base_url=base_url)
+
+
 @lru_cache
 def get_embedder() -> EmbeddingProvider:
-    """获取 embedding 提供者单例 (按配置的 provider/模型)."""
+    """获取 embedding 提供者单例 (按配置的 provider/模型).
+
+    启动期通道选择级降级: 首选 provider 不可用 (本地依赖缺失 / API Key 缺失)
+    时, 自动尝试另一可用通道兜底 (并告警), 避免语义检索整体不可用; 两者皆
+    不可用才报错。降级会切换 embedding_signature, 触发向量索引按签名重建。
+
+    注: 仅对"配置/依赖不可用"降级, 不对"运行时偶发调用失败"降级 (避免单条
+    向量落入不同向量空间, 破坏检索一致性)。
+    """
     settings = get_settings()
     provider = (settings.embedding_provider or "local").strip().lower()
     model_name = settings.embedding_model_name.strip()
 
     if provider == "local":
         try:
-            import sentence_transformers  # noqa: F401  # 仅探测可用性
-        except ImportError as e:
-            raise EmbeddingNotReadyError(
-                "本地 embedding 依赖未安装: pip install -e '.[embedding]' "
-                "(或设置 EMBEDDING_PROVIDER=api 使用 API 通道)"
-            ) from e
-        logger.info(f"🧠 embedding 通道: local | 模型: {model_name}")
-        return LocalSentenceTransformerEmbedder(model_name)
+            return _build_local(model_name)
+        except EmbeddingNotReadyError:
+            logger.warning(
+                "⚠️ 本地 embedding 依赖不可用, 降级到 API 通道 "
+                "(需 EMBEDDING_API_KEY, 否则语义检索不可用)"
+            )
+            return _build_api(
+                model_name, settings.embedding_base_url, settings.embedding_api_key
+            )
 
     if provider == "api":
-        if not settings.embedding_api_key:
-            raise EmbeddingNotReadyError(
-                "API embedding 通道需要配置 EMBEDDING_API_KEY / "
-                "EMBEDDING_BASE_URL / EMBEDDING_MODEL_NAME"
+        try:
+            return _build_api(
+                model_name, settings.embedding_base_url, settings.embedding_api_key
             )
-        logger.info(f"🧠 embedding 通道: api | 模型: {model_name} @ {settings.embedding_base_url}")
-        return ApiEmbedder(
-            model_name=model_name,
-            api_key=settings.embedding_api_key,
-            base_url=settings.embedding_base_url,
-        )
+        except EmbeddingNotReadyError:
+            logger.warning(
+                "⚠️ API embedding 不可用 (缺 EMBEDDING_API_KEY), "
+                "降级到本地通道 (需 sentence-transformers 依赖)"
+            )
+            return _build_local(model_name)
 
-    raise EmbeddingNotReadyError(f"未知 EMBEDDING_PROVIDER: {provider!r} (可选: local | api)")
+    raise EmbeddingNotReadyError(
+        f"未知 EMBEDDING_PROVIDER: {provider!r} (可选: local | api)"
+    )
 
 
 def embedding_signature() -> str:
