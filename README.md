@@ -48,8 +48,8 @@
 | **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取；PDF/Word 同样支持，**扫描版/混排版 PDF 逐页自动 OCR**（无文字层的页渲染位图后识别），并支持 **跨页表格自动检测与合并**（见下） |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
-| **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
-| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = **双路召回**（Milvus 向量 + BM25 jieba 分词）→ **RRF 融合** → **精排**（Reranker 重排 + 相似度阈值过滤），答案可溯源到具体法条；风险审查节点对 `legal_basis` 抽取「法名+条号」与召回法条逐条溯源核验，命中不了标注待人工复核并扣减置信度 |
+| **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线；**支持断点续跑与人工介入闸门**——高风险或含待复核项时在 `review_gate` 节点 `interrupt()` 挂起（状态落盘 Postgres/Memory checkpointer），审批通过后以同一 `thread_id` 从 checkpoint 续跑至完成 |
+| **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = **双路召回**（向量通道：Milvus 主库 + 本地 Chroma 降级备库；关键词通道：BM25 jieba 分词）→ **RRF 融合** → **精排**（Reranker 重排 + 相似度阈值过滤），答案可溯源到具体法条；风险审查节点对 `legal_basis` 抽取「法名+条号」与召回法条逐条溯源核验，命中不了标注待人工复核并扣减置信度 |
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
 | **MCP 协议支持** | 内置 MCP Server，将法条检索、条款分析、风险评分、谈判话术等能力标准化暴露，方便二次开发与外部 Agent 集成 |
@@ -102,7 +102,7 @@
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
 | 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
-| Milvus | 向量数据库（COSINE，动态维度）；不可用时向量通道自动关闭，仅保留 BM25 关键词检索 |
+| Milvus（主库）+ Chroma（降级备库） | 向量数据库：Milvus（COSINE，动态维度）为主库，本地嵌入式 Chroma 为降级备库；Milvus 不可用时自动降级 Chroma 兜底语义检索（仍为向量召回），两者均不可用才关闭向量通道仅保留 BM25 |
 | BM25 (jieba) | 法条语料全文关键词通道（零分未命中文档不进候选），与向量通道经 **RRF** 融合；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折） |
 | Reranker（精排） | RRF 融合候选再经 `rerank_candidates` 精排：默认轻量可解释精排（召回分 + 词覆盖 + 标题命中加权），可选 CrossEncoder（`BAAI/bge-reranker-base`）语义重排，并按相似度阈值过滤后取 Top-K |
 | MinIO | 对象存储，合同文件与扫描件上传 |
@@ -142,11 +142,13 @@ flowchart TB
     subgraph L4["④ 检索链路 · Hybrid RAG"]
         direction LR
         E1["Embedding<br/>bge-base-zh-v1.5 · 768 维"]
-        V1["Milvus 向量通道<br/>COSINE · 签名隔离集合"]
+        V1["Milvus 向量通道（主库）<br/>COSINE · 签名隔离集合"]
+        V2["Chroma 降级备库<br/>本地嵌入式 · Milvus 故障时兜底"]
         B1["BM25 关键词通道<br/>jieba + 法律领域词典"]
         F1["RRF 融合<br/>k = 60"]
         R1["精排 Reranker<br/>可解释 / CrossEncoder"]
         E1 --> V1 --> F1
+        V2 --> F1
         B1 --> F1
         F1 --> R1
     end
@@ -260,7 +262,7 @@ StateGraph(AgentState)
 
 | 工具 | 说明 | 数据来源 |
 |---|---|---|
-| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：双路召回（向量 Milvus + BM25）→ RRF → 精排 |
+| `law_search` | 检索劳动法条文知识库，返回带相关度的片段 | `rag/vector_store.search_laws()`：双路召回（向量通道 Milvus 主库 + Chroma 降级备库，关键词 BM25）→ RRF → 精排 |
 | `risk_assess` | 对结构化条款进行风险评分与法律依据匹配 | ReviewerAgent 内部逻辑 |
 | `clause_analyze` | 对单一条款进行深度分析 | LLM + 法条上下文 |
 | `negotiation` | 为风险条款生成可执行谈判话术 | LLM 生成 |
@@ -481,8 +483,11 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | 安全 | `API_SECRET_KEY` | （空，置空关闭鉴权） | 业务鉴权密钥 |
 | | `JWT_SECRET_KEY` | `change-me-in-production` | JWT 签名密钥 |
 | | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | Token 过期时间（7 天） |
-| Milvus | `MILVUS_HOST` / `MILVUS_PORT` | `localhost:19530` | 向量数据库地址 |
+| Milvus | `MILVUS_HOST` / `MILVUS_PORT` | `localhost:19530` | 向量数据库（主库）地址 |
 | | `MILVUS_COLLECTION` | `labor_laws` | 集合**基名**；实际集合 = 基名 + embedding 签名，换模型自动隔离重建 |
+| Chroma（降级备库） | `CHROMA_ENABLED` / `CHROMA_PERSIST_DIR` / `CHROMA_COLLECTION` | `true` / `data/chroma` / `lumos_laws` | 向量库降级备库（Milvus 不可用时兜底语义检索的本地嵌入式 Chroma） |
+| LangGraph checkpointer | `CHECKPOINT_BACKEND` | `postgres` | 断点续跑状态后端：`postgres`（AsyncPostgresSaver，生产）/ `memory`（内存，重启丢失，测试用） |
+| | `CHECKPOINT_POSTGRES_DSN` | `postgresql://lumos:lumos@localhost:5432/lumos` | Postgres 连接串（仅 postgres 后端） |
 | MinIO | `MINIO_ENDPOINT` | `localhost:9000` | 对象存储地址 |
 | | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `minioadmin` | 访问密钥 |
 | | `MINIO_BUCKET` | `lumos` | 存储桶名称 |
@@ -558,7 +563,8 @@ lumos/
 │   │   │   └── sub_agents/            # Extractor/Retriever/Reviewer/Negotiator/Consultant
 │   │   ├── rag/                       # 混合检索（真实 embedding + 双路召回 + RRF + 精排）
 │   │   │   ├── embeddings.py          # 双 Provider embedding（local / API），签名隔离
-│   │   │   ├── milvus_store.py        # Milvus 集合管理 + 检索（COSINE/动态维度）
+│   │   │   ├── milvus_store.py        # Milvus 集合管理 + 检索（主库, COSINE/动态维度）
+│   │   │   ├── chroma_store.py        # Chroma 集合管理 + 检索（Milvus 降级备库, 本地嵌入式）
 │   │   │   ├── vector_store.py        # 混合检索入口 search_laws（双路召回 → RRF → 精排）
 │   │   │   ├── bm25_index.py          # BM25 全文检索（jieba 分词 + 法律领域词典）
 │   │   │   ├── hybrid.py              # RRF 融合（Reciprocal Rank Fusion）
