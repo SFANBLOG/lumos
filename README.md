@@ -62,11 +62,11 @@
 
 | 工作台 | 合同分析结果 | 智能咨询 |
 |:---:|:---:|:---:|
-| ![工作台](front/shots/dashboard.png) | ![合同分析](front/shots/analysis-result.png) | ![智能咨询](front/shots/consult-3-answering.png) |
+| ![工作台](https://gitee.com/BLOGSFan/lumos/raw/main/front/shots/dashboard.png) | ![合同分析](https://gitee.com/BLOGSFan/lumos/raw/main/front/shots/analysis-result.png) | ![智能咨询](https://gitee.com/BLOGSFan/lumos/raw/main/front/shots/consult-3-answering.png) |
 
 | 文件导入分析 | MCP 工具箱 | 报告详情 |
 |:---:|:---:|:---:|
-| ![文件分析](front/shots/file-analysis-result.png) | ![MCP 工具](front/shots/mcp-1-law-search.png) | ![报告抽屉](front/shots/report-drawer.png) |
+| ![文件分析](https://gitee.com/BLOGSFan/lumos/raw/main/front/shots/file-analysis-result.png) | ![MCP 工具](https://gitee.com/BLOGSFan/lumos/raw/main/front/shots/mcp-1-law-search.png) | ![报告抽屉](https://gitee.com/BLOGSFan/lumos/raw/main/front/shots/report-drawer.png) |
 
 > 完整截图（含登录、咨询全流程、生产环境演练等 23 张）见 `front/shots/` 目录。
 
