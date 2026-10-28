@@ -54,7 +54,7 @@
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
 | **MCP 协议支持** | 内置 MCP Server，将法条检索、条款分析、风险评分、谈判话术等能力标准化暴露，方便二次开发与外部 Agent 集成 |
 | **A2A 协议支持** | 内置 A2A（Agent2Agent Protocol）端点，对外暴露标准 Agent Card（`/.well-known/agent.json`）与 JSON-RPC 端点（`/a2a` 同步、`/a2a/stream` SSE 流式），可被任意 A2A 客户端/其他 Agent 发现并调用，实现 Agent 间对等协作 |
-| **多端覆盖** | Flutter 移动端（iOS/Android）+ Vue 3 Web 端，同一后端服务，全场景触达 |
+| **多端覆盖** | Vue 3 Web 端为主；Flutter 移动端已归档（未纳入本仓库），同一后端服务 |
 
 ---
 
@@ -74,7 +74,9 @@
 
 ## 四、技术栈
 
-**客户端（Flutter，已归档至 `archive/client/`）**
+**移动端（Flutter，已归档，未纳入本仓库）**
+
+> ⚠️ 遗留 Flutter 移动端代码已归档，未纳入本仓库（原 `archive/client/`），仅供历史参考。
 
 | 技术 | 说明 |
 |:---|:---|
@@ -388,13 +390,7 @@ npm install
 npm run dev
 ```
 
-**Flutter 客户端（已归档）：**
-
-```bash
-cd archive/client   # 遗留移动端已归档（原 client/），代码仅供参考
-flutter pub get
-flutter run
-```
+> **Flutter 客户端（已归档，未纳入本仓库）**：遗留移动端代码原位于 `archive/client/`，现已归档并不包含在本仓库中，仅供历史参考。
 
 > ⚠️ 本地网络无法直连 HuggingFace 时，embedding 模型下载可走镜像：`$env:HF_ENDPOINT='https://hf-mirror.com'`（PowerShell）或 `export HF_ENDPOINT=https://hf-mirror.com`（bash）。
 
@@ -412,7 +408,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **43 条 pytest 用例**（默认跑 41 条，另 2 条 e2e 需 `LUMOS_E2E=1`）覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层（见 `backend/tests/`）；
+- 当前 **100+ 条 pytest 用例**（其中 2 条 e2e 需 `LUMOS_E2E=1`），覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、表格跨栏合并、多栏栏感知抽取、Embedding/Chroma 降级兜底（见 `backend/tests/`）；
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -527,11 +523,7 @@ lumos/
 ├── .env.example                       # 环境变量模板
 ├── .gitignore
 │
-├── archive/client/                    # 遗留 Flutter 移动端（已归档，原 client/）
-│   └── lib/
-│       ├── core/                      # API、状态、路由、主题
-│       ├── features/                  # 业务功能模块（analysis/home/main/mcp/report/scanner/splash）
-│       └── shared/                    # 公共组件
+├── （archive/client/ 遗留 Flutter 移动端已归档，未纳入本仓库）
 │
 ├── front/                             # Vue 3 Web 前端
 │   ├── src/
@@ -572,7 +564,7 @@ lumos/
 │   │   └── skills/                    # 可复用技能
 │   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
 │   │   └── retrieval_eval.py
-│   ├── tests/                         # 43 条 pytest 用例（41 默认 + 2 e2e marker）
+│   ├── tests/                         # 100+ 条 pytest 用例（2 条 e2e marker）
 │   ├── models/                        # 本地 embedding 权重（bge-base-zh-v1.5，已 gitignore）
 │   ├── logs/                          # 运行日志（每日轮转/保留 30 天，已 gitignore）
 │   ├── pyproject.toml
