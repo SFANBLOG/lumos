@@ -1,0 +1,95 @@
+# PocketBay 打包排除清单
+# 手册默认排除: node_modules, .git, .next, virtual envs, caches
+# 本清单在此基础上额外排除 Lumos 项目的隐私/大体积文件
+
+# ---- 隐私文档 (个人简历 / 求职题库) ----
+简历_项目介绍.md
+Agent面试题库.md
+docs/Agent面试题库.md
+docs/个人/
+*.bak
+*.swp
+
+# ---- 凭据文件 (含 DeepSeek / MySQL / MinIO 真实密钥) ----
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+
+# ---- 本地 embedding 模型权重 (470MB, 部署后改用 API) ----
+backend/models/
+backend/hf_cache/
+**/*.bin
+**/*.safetensors
+**/*.gguf
+**/*.pt
+**/*.pth
+
+# ---- Python 缓存与构建产物 ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.tox/
+.nox/
+
+# ---- 前端依赖与构建产物 ----
+front/node_modules/
+front/dist/
+front/.vite/
+
+# ---- 数据库与日志 ----
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+chroma_db/
+logs/
+*.log
+backend/logs/
+backend/eval/output/
+
+# ---- WorkBuddy Agent 记忆/备份 (非项目代码) ----
+.workbuddy/
+.workbuddy/backup/
+.workbuddy/memory/
+.workbuddy/cache/
+.workbuddy/scratch/
+
+# ---- 临时文件 ----
+tmp/
+temp/
+*.tmp
+
+# ---- IDE 工作区文件 ----
+.idea/workspace.xml
+.idea/shelf/
+.idea/httpRequests/
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- Docker / 编排产物 ----
+docker-compose.override.yml
+
+# ---- 评测金标准 / 调试探针 ----
+backend/eval/_tune_hybrid.py
+backend/eval/_probe_*.py
+backend/eval/_rebuild*.py
+backend/eval/_fix*.py
+backend/eval/_wait_load.py
+backend/eval/_finish.py

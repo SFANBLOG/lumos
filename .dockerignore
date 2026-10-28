@@ -1,0 +1,80 @@
+# ========================================
+# Lumos — PocketBay 部署 .dockerignore
+# ========================================
+# 与 .pocketbayignore 的差异:
+#   - 这是 Docker build 阶段就排除 (COPY 之前)
+#   - 比 .pocketbayignore 更激进: 把大目录整段砍掉, 加快镜像构建
+
+# ---- OS 噪音 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Git / IDE ----
+.git/
+.gitignore
+.idea/
+.vscode/
+.workbuddy/
+
+# ---- 后端隐私 / 凭据 ----
+.env
+.env.*
+!**/.env.example
+backend/.env
+backend/.env.*
+!**/backend/.env.example
+
+# ---- 后端模型权重 (470MB+, PocketBay 改用 API embedding) ----
+backend/models/
+backend/hf_cache/
+
+# ---- 后端缓存 ----
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/htmlcov/
+backend/.coverage
+backend/eval/output/
+
+# ---- 后端日志 ----
+backend/logs/
+*.log
+
+# ---- 临时调试文件 ----
+backend/eval/_tune_hybrid.py
+backend/eval/_probe_*.py
+backend/eval/_rebuild*.py
+backend/eval/_fix*.py
+backend/eval/_wait_load.py
+backend/eval/_finish.py
+*.bak
+*.tmp
+
+# ---- 前端依赖 / 构建产物 (Dockerfile 会自己构建) ----
+front/node_modules/
+front/dist/
+front/.vite/
+
+# ---- 个人文档 (隐私) ----
+简历_项目介绍.md
+Agent面试题库.md
+docs/个人/
+docs/Agent面试题库.md
+
+# ---- Docker 自身产物 ----
+docker-compose.override.yml
+Dockerfile.local
+
+# ---- 测试 / 文档 (PocketBay 不需要) ----
+backend/tests/
+docs/
+*.md
+!backend/README.md
+!backend/pyproject.toml
+!backend/Dockerfile
+!lumos/POCKETBAY_DEPLOY.md

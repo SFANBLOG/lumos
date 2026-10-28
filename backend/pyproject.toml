@@ -1,0 +1,125 @@
+[project]
+name = "lumos-server"
+version = "0.2.0"
+description = " Lumos · 契光鉴微 — AI 合同风险排查引擎"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Lumos Contributors" },
+]
+
+dependencies = [
+    # ---- Web Framework ----
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "python-multipart>=0.0.18",
+
+    # ---- AI / Agent ----
+    "langchain-openai>=0.3.0",
+    "langgraph>=0.2.60",  # 合同审查工作流 StateGraph 编排
+
+    # ---- RAG & Document ----
+    "pymilvus>=2.4.0",
+    "sentence-transformers>=3.0.0",  # 本地 embedding 模型 (默认 provider=local, 首次缺失自动下载)
+    "rank-bm25>=0.2.2",  # BM25 全文检索 (混合检索关键词通道)
+    "jieba>=0.42.1",  # 中文分词 (BM25 索引构建)
+    "pypdf>=5.0.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "python-pptx>=1.0.0",
+
+    # ---- Database ----
+    "sqlmodel>=0.0.22",
+    "aiomysql>=0.2.0",
+    "pymysql>=1.1.0",
+    "asyncpg>=0.30.0",  # 异步 PostgreSQL 驱动 (PocketBay 托管库注入 postgresql://)
+
+    # ---- Object Storage ----
+    "minio>=7.2.0",
+
+    # ---- OCR (图片上传 / 扫描版 PDF 抽取文字) ----
+    "pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+    "pymupdf>=1.24.0",  # 扫描版 PDF 无文字层时逐页渲染为位图供 OCR
+
+    # ---- Auth ----
+    "python-jose[cryptography]>=3.3.0",
+    "bcrypt>=4.0.0",
+    "email-validator>=2.0.0",  # pydantic EmailStr (注册表单)
+
+    # ---- Configuration ----
+    "pydantic-settings>=2.7.0",
+
+    # ---- Utilities ----
+    "httpx>=0.28.0",
+    "loguru>=0.7.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
+    "pre-commit>=4.0.0",
+]
+
+# 本地真实 embedding 模型已并入主依赖 (provider=local 默认启用, 首次缺失自动下载)。
+# 如需改用 OpenAI 兼容 embedding 接口, 设 EMBEDDING_PROVIDER=api 即可, 无需额外依赖。
+
+postgres = [
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "UP",    # pyupgrade
+    "ANN",   # flake8-annotations
+    "ASYNC", # flake8-async
+    "S",     # flake8-bandit
+]
+ignore = [
+    "ANN101", # Missing type annotation for `self`
+    "ANN102", # Missing type annotation for `cls`
+    "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
+    "S101",   # Use of `assert` detected (OK in tests)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short --cov=app --cov-report=term-missing --cov-report=html:htmlcov"
+markers = [
+    "e2e: 端到端效果评测 (需要真实 LLM Key, 默认跳过)",
+    "retrieval: 检索链路评测 (基于 data/contracts 金标准, 需要可用 embedding)",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

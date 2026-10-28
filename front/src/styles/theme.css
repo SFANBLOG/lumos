@@ -1,0 +1,380 @@
+/* ============================================================
+   契智 · QI ZHI LEGAL INTELLIGENCE
+   全局设计系统：颜色令牌 / 排版 / 通用容器 / Element Plus 校准
+   ============================================================ */
+
+:root {
+  /* 品牌 */
+  --qz-primary: #6c4cf1;
+  --qz-primary-600: #5a3ade;
+  --qz-primary-400: #8f78f5;
+  --qz-primary-soft: #f2eefe;
+  --qz-primary-line: #e2d9fd;
+
+  /* 文本 */
+  --qz-ink: #1b1d2e;
+  --qz-ink-2: #4c5165;
+  --qz-ink-3: #767d92;
+  --qz-muted: #9aa0b3;
+
+  /* 表面 */
+  --qz-canvas: #f6f7fb;
+  --qz-card: #ffffff;
+  --qz-line: #eef0f6;
+  --qz-line-strong: #e4e7f0;
+  --qz-sidebar: #1a1733;
+
+  /* 语义色 */
+  --qz-success: #1fae72;
+  --qz-success-soft: #e9f8f1;
+  --qz-warn: #eda01d;
+  --qz-warn-soft: #fef5e3;
+  --qz-danger: #e34b4b;
+  --qz-danger-soft: #fdeded;
+  --qz-info: #3b82f6;
+  --qz-info-soft: #eaf2ff;
+
+  --qz-radius: 14px;
+  --qz-shadow: 0 1px 2px rgba(24, 26, 48, 0.03), 0 8px 24px rgba(24, 26, 48, 0.04);
+
+  /* Element Plus 主题映射 */
+  --el-color-primary: #6c4cf1;
+  --el-color-primary-light-3: #8f78f5;
+  --el-color-primary-light-5: #ab9bf8;
+  --el-color-primary-light-7: #c8bdfb;
+  --el-color-primary-light-8: #d8d0fc;
+  --el-color-primary-light-9: #f2eefe;
+  --el-color-primary-dark-2: #5a3ade;
+  --el-color-success: #1fae72;
+  --el-color-warning: #eda01d;
+  --el-color-danger: #e34b4b;
+  --el-color-info: #767d92;
+  --el-text-color-primary: #1b1d2e;
+  --el-text-color-regular: #4c5165;
+  --el-text-color-secondary: #767d92;
+  --el-text-color-placeholder: #a8aec0;
+  --el-border-color: #e4e7f0;
+  --el-border-color-light: #eef0f6;
+  --el-border-color-lighter: #f3f4f9;
+  --el-fill-color-light: #f7f8fc;
+  --el-fill-color-blank: #ffffff;
+  --el-border-radius-base: 9px;
+  --el-bg-color-page: #f6f7fb;
+
+  color: var(--qz-ink);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--qz-canvas);
+  font-size: 14px;
+  color: var(--qz-ink);
+}
+
+a {
+  color: var(--qz-primary);
+  text-decoration: none;
+}
+
+/* ── 滚动条 ─────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8dbe8;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c3c7d8;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── 页面骨架 ───────────────────────────────── */
+.qz-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  animation: qz-fade-in 0.32s ease;
+}
+
+@keyframes qz-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.qz-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.qz-page-head h1 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--qz-ink);
+}
+
+.qz-page-head p {
+  margin: 8px 0 0;
+  color: var(--qz-ink-3);
+  font-size: 13.5px;
+}
+
+.qz-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ── 面板 ───────────────────────────────────── */
+.qz-panel {
+  background: var(--qz-card);
+  border: 1px solid var(--qz-line);
+  border-radius: var(--qz-radius);
+  box-shadow: var(--qz-shadow);
+}
+
+.qz-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 12px;
+}
+
+.qz-panel-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--qz-ink);
+}
+
+.qz-panel-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--qz-muted);
+}
+
+.qz-panel-body {
+  padding: 4px 20px 20px;
+}
+
+/* ── 自定义胶囊标签 ─────────────────────────── */
+.qz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.qz-chip--danger {
+  background: var(--qz-danger-soft);
+  color: #cf3b3b;
+}
+.qz-chip--warn {
+  background: var(--qz-warn-soft);
+  color: #c17f0d;
+}
+.qz-chip--success {
+  background: var(--qz-success-soft);
+  color: #138a5b;
+}
+.qz-chip--info {
+  background: var(--qz-info-soft);
+  color: #2f6fd0;
+}
+.qz-chip--primary {
+  background: var(--qz-primary-soft);
+  color: var(--qz-primary-600);
+}
+.qz-chip--muted {
+  background: #f3f4f9;
+  color: #6f758a;
+}
+
+.qz-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ── 图标底板 ───────────────────────────────── */
+.qz-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.qz-icon-box--primary {
+  background: var(--qz-primary-soft);
+  color: var(--qz-primary);
+}
+.qz-icon-box--warn {
+  background: var(--qz-warn-soft);
+  color: var(--qz-warn);
+}
+.qz-icon-box--info {
+  background: var(--qz-info-soft);
+  color: var(--qz-info);
+}
+.qz-icon-box--success {
+  background: var(--qz-success-soft);
+  color: var(--qz-success);
+}
+.qz-icon-box--danger {
+  background: var(--qz-danger-soft);
+  color: var(--qz-danger);
+}
+
+/* ── 表格 ───────────────────────────────────── */
+.qz-table.el-table {
+  --el-table-border-color: transparent;
+  --el-table-header-bg-color: #fafbfe;
+  --el-table-row-hover-bg-color: #faf9ff;
+  font-size: 13px;
+  color: var(--qz-ink-2);
+}
+.qz-table.el-table::before,
+.qz-table .el-table__inner-wrapper::before {
+  display: none;
+}
+.qz-table .el-table__header th.el-table__cell {
+  background: #fafbfe;
+  color: #8d93a7;
+  font-weight: 600;
+  font-size: 12px;
+  height: 46px;
+  border-bottom: 1px solid var(--qz-line);
+}
+.qz-table .el-table__body td.el-table__cell {
+  border-bottom: 1px solid #f4f5fa;
+  padding: 13px 0;
+}
+.qz-table .el-table__body tr:last-child td.el-table__cell {
+  border-bottom: 0;
+}
+.qz-table .cell {
+  line-height: 1.5;
+}
+
+/* ── Element Plus 微调 ──────────────────────── */
+.el-button {
+  font-weight: 550;
+  border-radius: 9px;
+}
+.el-button--primary {
+  box-shadow: 0 6px 14px rgba(108, 76, 241, 0.2);
+}
+.el-button--primary.is-link,
+.el-button--primary.is-text {
+  box-shadow: none;
+}
+.el-button--large {
+  height: 40px;
+}
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px var(--qz-line-strong) inset;
+}
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--qz-primary) inset;
+}
+.el-tabs__item {
+  font-size: 13.5px;
+  color: var(--qz-ink-3);
+}
+.el-tabs__item.is-active {
+  color: var(--qz-ink);
+  font-weight: 600;
+}
+.el-tabs__nav-wrap::after {
+  height: 1px;
+  background: var(--qz-line);
+}
+.el-tabs__active-bar {
+  height: 2px;
+  border-radius: 2px;
+}
+.el-drawer__header {
+  margin-bottom: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--qz-line);
+  color: var(--qz-ink);
+  font-weight: 600;
+}
+.el-drawer__body {
+  padding: 18px 22px;
+}
+.el-dialog {
+  border-radius: 16px;
+}
+.el-pagination {
+  --el-pagination-button-bg-color: #ffffff;
+  font-weight: 500;
+}
+.el-pagination.is-background .el-pager li.is-active {
+  background: var(--qz-primary);
+}
+.el-loading-mask {
+  border-radius: var(--qz-radius);
+}
+
+/* ── 文本工具类 ─────────────────────────────── */
+.qz-muted {
+  color: var(--qz-muted);
+}
+.qz-mono {
+  font-family: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+  letter-spacing: -0.2px;
+}
+.qz-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .qz-page-head {
+    flex-direction: column;
+  }
+}

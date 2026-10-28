@@ -1,0 +1,144 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: lumos-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-lumos}
+      MYSQL_USER: ${MYSQL_USER:-lumos}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-lumos}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3308:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: lumos-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: lumos-milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - milvus_etcd:/etcd
+    command: >
+      etcd -advertise-client-urls http://127.0.0.1:2379
+      -listen-client-urls http://0.0.0.0:2379
+      -data-dir /etcd
+
+  milvus-minio:
+    image: minio/minio:latest
+    container_name: lumos-milvus-minio
+    environment:
+      MINIO_ROOT_USER: milvusadmin
+      MINIO_ROOT_PASSWORD: milvusadmin
+    volumes:
+      - milvus_minio_data:/minio_data
+    command: >
+      minio server /minio_data
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.4.0
+    container_name: lumos-milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_ACCESSKEYID: milvusadmin
+      MINIO_SECRETACCESSKEY: milvusadmin
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19531:19530"
+      - "19091:9091"
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lumos-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 容器内保持 8000, 宿主机通过 ports 8001:8000 访问; 与本地开发端口 8001 区分
+      APP_PORT: 8000
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER:-lumos}:${MYSQL_PASSWORD:-lumos}@mysql:3306/${MYSQL_DATABASE:-lumos}
+      MILVUS_HOST: milvus-standalone
+      MILVUS_PORT: 19530
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      # 国内访问 huggingface.co 受限时用于拉取本地 embedding 模型 (可被 .env 覆盖)
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+      # 使用宿主机持久化好的本地 embedding 模型 (只读), 避免容器内重复下载
+      EMBEDDING_MODEL_NAME: /models/bge-base-zh-v1.5
+      # hf-mirror 不代理 Xet CAS 服务, 不禁用会 401 导致下载失败
+      HF_HUB_DISABLE_XET: "1"
+    ports:
+      - "8001:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+      # 本地 embedding 模型 (宿主机持久化, 只读挂载; 无需容器内重新下载)
+      - ./backend/models:/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: lumos-front
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  minio_data:
+  milvus_data:
+  milvus_etcd:
+  milvus_minio_data:

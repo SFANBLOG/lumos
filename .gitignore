@@ -1,0 +1,50 @@
+# ===== Dependencies =====
+node_modules/
+**/node_modules/
+.pnp
+.pnp.js
+
+# ===== Build output =====
+dist/
+build/
+out/
+*.tsbuildinfo
+front/dist/
+front/build/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# ===== Archive (legacy client code) =====
+archive/
+
+# ===== Local / secret =====
+.env
+.env.local
+.env.*.local
+*.log
+*.ses
+
+# ===== Personal interview-prep docs (not project source) =====
+简历_项目介绍.md
+简历_第二个项目改写.md
+契光鉴微_面试准备.md
+
+# ===== Editor / OS =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
