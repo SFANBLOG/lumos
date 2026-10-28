@@ -11,7 +11,7 @@
         <el-form-item label="再次输入密码" prop="confirmPassword">
           <el-input v-model="form.confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" placeholder="请再次输入密码"><template #append><el-button link @click="showConfirmPassword = !showConfirmPassword">{{ showConfirmPassword ? '隐藏' : '显示' }}</el-button></template></el-input>
         </el-form-item>
-        <el-form-item label="验证码" prop="captchaAnswer"><div class="captcha-row"><el-input v-model.trim="form.captchaAnswer" placeholder="请输入结果" /><el-button :loading="captchaLoading" @click="loadCaptcha">{{ captchaQuestion || '获取验证码' }}</el-button></div></el-form-item>
+        <el-form-item label="数字验证码" prop="captchaAnswer"><div class="captcha-row"><el-input v-model.trim="form.captchaAnswer" placeholder="请输入上方数字" /><el-button :loading="captchaLoading" @click="loadCaptcha" type="info" plain>{{ captchaQuestion || '获取验证码' }}</el-button></div></el-form-item>
         <el-button native-type="submit" type="primary" :loading="loading" style="width: 100%">注册</el-button>
       </el-form>
       <div class="extra"><el-link type="primary" @click="$router.push('/login')">已有账号？去登录</el-link></div>

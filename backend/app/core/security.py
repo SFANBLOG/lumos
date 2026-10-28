@@ -58,15 +58,17 @@ def decode_access_token(token: str) -> dict:
 
 
 def create_captcha_challenge() -> tuple[str, str]:
-    """生成五分钟有效、由服务端签名的算术验证码挑战。"""
-    left = secrets.randbelow(9) + 1
-    right = secrets.randbelow(9) + 1
+    """生成五分钟有效、由服务端签名的随机数字验证码（无需邮箱验证）。
+
+    前端展示该随机数字，用户照着输入即可，避免依赖外部邮箱验证码服务。
+    """
+    code = f"{secrets.randbelow(9000) + 1000}"  # 4 位随机数字
     token = jwt.encode(
-        {"type": "captcha", "answer": str(left + right), "exp": datetime.now(UTC) + timedelta(minutes=5)},
+        {"type": "captcha", "answer": code, "exp": datetime.now(UTC) + timedelta(minutes=5)},
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
     )
-    return f"{left} + {right} = ?", token
+    return f"验证码：{code}", token
 
 
 def verify_captcha_challenge(token: str, answer: str) -> bool:
