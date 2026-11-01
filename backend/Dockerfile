@@ -18,12 +18,9 @@ COPY pyproject.toml ./
 # 安装 uv: 改用 pip 从国内源安装, 避免从 ghcr.io 拉取 uv 镜像 (本环境 ghcr 极慢)
 RUN pip install --no-cache-dir uv
 
-# torch 的纯 Python 依赖 (如 markupsafe) 在 pytorch 官方索引缺失, 先从清华 PyPI 预装, 避免解析中断
-RUN uv pip install --system --no-cache jinja2 markupsafe
-# 装 CPU 版 torch: 使用阿里云 pytorch CPU wheel 镜像 (国内 CDN, 稳定且快, 远优于官方源);
-# 本服务纯 CPU 推理, 避免拉取 2.5GB 的 NVIDIA CUDA 运行库. torch 从阿里云 find-links 取 (+cpu 优先于 PyPI 的 plain 版),
-# 其余依赖 (sympy/networkx/jinja2...) 走清华 PyPI (UV_INDEX_URL)
-RUN uv pip install --system --no-cache torch --find-links https://mirrors.aliyun.com/pytorch-wheels/cpu
+# 注意: 必须保留 wheel 原始文件名 (PEP 427 命名), 重命名会导致 uv 报 "Must have a version"
+COPY torch-2.6.0+cpu-cp312-cp312-linux_x86_64.whl /tmp/
+RUN uv pip install --system --no-cache /tmp/torch-2.6.0+cpu-cp312-cp312-linux_x86_64.whl && rm -f /tmp/torch-2.6.0+cpu-cp312-cp312-linux_x86_64.whl
 # 再装其余依赖 (torch 已满足 sentence-transformers 约束, 不会重复拉取 CUDA 版)
 RUN uv pip install --system --no-cache -r pyproject.toml
 
@@ -55,8 +52,11 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 复制应用代码
-COPY . .
+# 复制应用代码 (精确复制, 避免把 178MB 的 torch wheel 等无关文件打进镜像)
+COPY app ./app
+COPY eval ./eval
+COPY scripts ./scripts
+COPY pyproject.toml README.md ./
 
 # 非 root 用户运行
 RUN groupadd -r lumos && useradd -r -g lumos lumos \
