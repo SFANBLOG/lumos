@@ -16,9 +16,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import select
 
+from app.agent.intent import recognize_intent
 from app.agent.sub_agents.consultant_agent import ConsultantAgent
 from app.api.deps import DBSession, get_current_user
 from app.models.analysis import AnalysisResult, RiskItem
@@ -41,6 +43,28 @@ _MAX_CONTEXT_RISKS = 6
 def _sse(event: ConsultEventType, data: dict) -> str:
     """格式化一条 SSE 帧."""
     return f"event: {event.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+class IntentRequest(BaseModel):
+    """意图识别请求."""
+
+    question: str = Field(min_length=1, max_length=2000, description="待识别的问题")
+
+
+@router.post("/intent", summary="意图识别 (独立接口)")
+async def detect_intent(
+    req: IntentRequest,
+    _user: User = Depends(get_current_user),
+) -> dict:
+    """对问题做意图分类, 返回意图、置信度与命中关键词."""
+    result = await recognize_intent(req.question)
+    return {
+        "intent": result.intent.value,
+        "label": result.label,
+        "confidence": result.confidence,
+        "method": result.method,
+        "matched": result.matched,
+    }
 
 
 async def _build_contract_context(

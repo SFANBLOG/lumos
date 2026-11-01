@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from app.agent.base import BaseAgent
+from app.agent.intent import Intent, IntentResult, recognize_intent
 from app.mcp.client import MCPClient
 from app.skills import get_skill
 
@@ -23,6 +24,16 @@ _SYSTEM_PROMPT = """你是 Lumos 的劳动法律顾问，站在劳动者（打�
 3. 素材中找不到直接依据时，要明说"未找到直接适用的法条"，并建议向当地劳动监察大队或工会求助，不要编造法条；
 4. 涉及维权路径时给出可执行步骤（协商 → 劳动监察投诉 → 劳动仲裁），不要承诺结果；
 5. 若提供了关联合同报告的上下文，结合其中的风险项作答。"""
+
+
+# 意图 → 作答侧重点提示 (让同一个咨询模型按意图调整输出)
+_INTENT_HINTS: dict[Intent, str] = {
+    Intent.LAW_QUERY: "请优先给出法条名称、条号与原文依据，用 [n] 标注。",
+    Intent.RISK_ANALYSIS: "请重点指出风险点、严重程度与可能的后果。",
+    Intent.NEGOTIATION: "请给出可直接复制给用人单位的谈判话术，分点、口语化。",
+    Intent.CLAUSE_EXPLAIN: "请先把条款或名词解释清楚，再说明对劳动者的影响。",
+    Intent.PROCEDURE: "请按可执行的步骤给出维权路径（协商→投诉→仲裁）。",
+}
 
 
 def _rag_fallback_answer(
@@ -82,6 +93,34 @@ class ConsultantAgent(BaseAgent):
         except Exception as e:  # 技能失败不影响主流程
             logger.debug(f"[consultant] 文本清洗失败: {e}")
 
+        # 0. 意图识别 (规则优先, 低置信度可选模型兜底)
+        intent_result: IntentResult = await recognize_intent(cleaned)
+        yield {
+            "type": "step",
+            "message": f"识别意图：{intent_result.label}（置信度 {intent_result.confidence:.0%}）",
+        }
+        logger.info(
+            f"[consultant] 意图识别 | {intent_result.intent.value} "
+            f"method={intent_result.method} conf={intent_result.confidence}"
+        )
+
+        # 纯寒暄/无关问题: 不检索法条, 直接引导, 省 token、少噪声
+        if intent_result.intent is Intent.CHITCHAT and intent_result.confidence >= 0.6:
+            yield {
+                "type": "final",
+                "content": (
+                    "你好，我是 Lumos 劳动法顾问。可以直接问我劳动合同、工资、"
+                    "加班、竞业限制、离职赔偿等问题，我会结合法条用大白话讲清楚。"
+                ),
+                "references": [],
+                "suggestions": [
+                    "竞业限制有没有补偿？",
+                    "试用期工资怎么算？",
+                    "被辞退能拿赔偿吗？",
+                ],
+            }
+            return
+
         # 1. RAG 检索
         yield {"type": "step", "message": "正在检索《劳动合同法》《劳动法》等条文…"}
         laws: list[dict[str, Any]] = []
@@ -120,7 +159,10 @@ class ConsultantAgent(BaseAgent):
             material.append(
                 f"[{i}] {law['law_name']} {law['article']}\n{law['content']}"
             )
-        prompt_parts = [f"问题：{cleaned}"]
+        prompt_parts = [f"用户意图：{intent_result.label}", f"问题：{cleaned}"]
+        intent_hint = _INTENT_HINTS.get(intent_result.intent)
+        if intent_hint:
+            prompt_parts.append(intent_hint)
         if material:
             prompt_parts.append("可引用的法条素材：\n" + "\n\n".join(material))
         if contract_context:
