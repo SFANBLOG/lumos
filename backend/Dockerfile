@@ -18,12 +18,12 @@ COPY pyproject.toml ./
 # 安装 uv: 改用 pip 从国内源安装, 避免从 ghcr.io 拉取 uv 镜像 (本环境 ghcr 极慢)
 RUN pip install --no-cache-dir uv
 
-# torch 的部分纯 Python 依赖 (如 markupsafe) 在 PyTorch 索引上缺失/易超时,
-# 先从清华 PyPI 预装, 避免 torch 解析依赖时因拉不到 markupsafe 而失败
+# torch 的纯 Python 依赖 (如 markupsafe) 在 pytorch 官方索引缺失, 先从清华 PyPI 预装, 避免解析中断
 RUN uv pip install --system --no-cache jinja2 markupsafe
-# 先装 CPU 版 torch (本服务纯 CPU 推理, 避免拉取 2.5GB 的 NVIDIA CUDA 运行库; 依赖已就绪, 不会中断)
-# 清华/USTC 等均未镜像 pytorch CPU wheel, 仍使用官方 CPU 索引 (download.pytorch.org)
-RUN uv pip install --system --no-cache torch --index-url https://download.pytorch.org/whl/cpu
+# 装 CPU 版 torch: 使用阿里云 pytorch CPU wheel 镜像 (国内 CDN, 稳定且快, 远优于官方源);
+# 本服务纯 CPU 推理, 避免拉取 2.5GB 的 NVIDIA CUDA 运行库. torch 从阿里云 find-links 取 (+cpu 优先于 PyPI 的 plain 版),
+# 其余依赖 (sympy/networkx/jinja2...) 走清华 PyPI (UV_INDEX_URL)
+RUN uv pip install --system --no-cache torch --find-links https://mirrors.aliyun.com/pytorch-wheels/cpu
 # 再装其余依赖 (torch 已满足 sentence-transformers 约束, 不会重复拉取 CUDA 版)
 RUN uv pip install --system --no-cache -r pyproject.toml
 
