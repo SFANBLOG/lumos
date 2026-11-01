@@ -38,6 +38,15 @@ export interface ConsultAskBody {
   contract_id?: string | null
 }
 
+/** 意图识别结果 (POST /consult/intent) */
+export interface IntentResult {
+  intent: string
+  label: string
+  confidence: number
+  method: string
+  matched: string[]
+}
+
 export type ConsultEventType =
   | 'session'
   | 'step'
@@ -56,6 +65,10 @@ export const consultApi = {
   },
   remove(sessionId: string) {
     return apiClient.delete(`/consult/sessions/${sessionId}`)
+  },
+  /** 意图识别: 输入框实时识别用户问题意图 */
+  intent(question: string) {
+    return apiClient.post<IntentResult>('/consult/intent', { question })
   },
 }
 

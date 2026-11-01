@@ -89,18 +89,32 @@
 
       <!-- ── 底栏: 输入区 ────────────────────────────── -->
       <div class="input-bar">
-        <el-input
-          v-model="draft"
-          type="textarea"
-          :rows="1"
-          autosize
-          resize="none"
-          placeholder="输入你的劳动法问题，Enter 发送，Shift+Enter 换行"
-          :disabled="answering"
-          maxlength="2000"
-          show-word-limit
-          @keydown.enter.exact.prevent="send"
-        />
+        <div class="input-main">
+          <el-input
+            v-model="draft"
+            type="textarea"
+            :rows="1"
+            autosize
+            resize="none"
+            placeholder="输入你的劳动法问题，Enter 发送，Shift+Enter 换行"
+            :disabled="answering"
+            maxlength="2000"
+            show-word-limit
+            @keydown.enter.exact.prevent="send"
+          />
+          <!-- 意图识别: 输入框下方实时显示 -->
+          <div
+            v-if="intentLoading || (intentResult && intentResult.intent !== 'unknown')"
+            class="intent-hint"
+          >
+            <span v-if="intentLoading && !intentResult" class="intent-loading">正在识别意图…</span>
+            <template v-else-if="intentResult">
+              <el-tag size="small" :type="intentTagType" effect="plain">{{ intentResult.label }}</el-tag>
+              <span class="intent-conf">置信度 {{ Math.round(intentResult.confidence * 100) }}%</span>
+              <span class="intent-method">· {{ intentResult.method === 'llm' ? '模型判定' : '规则判定' }}</span>
+            </template>
+          </div>
+        </div>
         <el-button
           type="primary"
           class="send-btn"
@@ -136,6 +150,7 @@ import {
   consultApi,
   type ConsultMessage,
   type ConsultRef,
+  type IntentResult,
 } from '@/api/consult'
 import { formatTime } from '@/utils/contractMeta'
 import { useConsultStore } from '@/stores/consult'
@@ -154,6 +169,76 @@ const draft = ref('')
 const answering = ref(false)
 const steps = ref<string[]>([])
 let abortCtrl: AbortController | null = null
+
+// ── 意图识别 (输入框下方实时提示) ────────────────────
+const intentResult = ref<IntentResult | null>(null)
+const intentLoading = ref(false)
+/** 意图 → 标签配色; 未登记的意图统一走 info */
+const INTENT_TAG_TYPES: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
+  law_query: 'success',
+  clause_explain: 'info',
+  risk_analysis: 'danger',
+  negotiation: 'warning',
+  procedure: 'warning',
+  chitchat: 'info',
+}
+const intentTagType = computed(
+  () => INTENT_TAG_TYPES[intentResult.value?.intent ?? ''] ?? 'info'
+)
+
+const _INTENT_MIN_LEN = 2 // 少于 2 个字不识别, 避免输入过程中的噪音请求
+const _INTENT_DEBOUNCE = 400 // ms, 停止输入后再请求
+let intentTimer: ReturnType<typeof setTimeout> | null = null
+let intentSeq = 0 // 请求序号: 后发请求覆盖先发请求, 丢弃过期响应
+
+const clearIntentTimer = () => {
+  if (intentTimer !== null) {
+    clearTimeout(intentTimer)
+    intentTimer = null
+  }
+}
+
+/** 丢弃在途请求并清空提示 (输入清空 / 发送后) */
+const resetIntent = () => {
+  clearIntentTimer()
+  intentSeq++
+  intentResult.value = null
+  intentLoading.value = false
+}
+
+const runIntent = async (question: string) => {
+  const seq = ++intentSeq
+  intentLoading.value = true
+  try {
+    const { data } = await consultApi.intent(question)
+    if (seq !== intentSeq) return // 已有更新的输入, 丢弃本次结果
+    intentResult.value = data
+  } catch {
+    if (seq === intentSeq) intentResult.value = null // 静默失败, 不打扰用户
+  } finally {
+    if (seq === intentSeq) intentLoading.value = false
+  }
+}
+
+watch(draft, (val) => {
+  clearIntentTimer()
+  const q = (val || '').trim()
+  if (q.length < _INTENT_MIN_LEN || answering.value) {
+    resetIntent()
+    return
+  }
+  intentSeq++ // 使在途请求失效
+  intentResult.value = null // 旧结论已不适用, 立刻进入「识别中」
+  intentLoading.value = true
+  intentTimer = setTimeout(() => {
+    intentTimer = null
+    if (answering.value) {
+      intentLoading.value = false
+      return
+    }
+    runIntent(q)
+  }, _INTENT_DEBOUNCE)
+})
 
 const refDialogVisible = ref(false)
 const refDialogTitle = ref('')
@@ -353,7 +438,10 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => abortCtrl?.abort())
+onBeforeUnmount(() => {
+  abortCtrl?.abort()
+  clearIntentTimer()
+})
 </script>
 
 <style scoped>
@@ -497,13 +585,39 @@ onBeforeUnmount(() => abortCtrl?.abort())
 }
 .input-bar {
   display: flex;
-  align-items: flex-end;
+  /* 顶对齐: 输入框下方多了意图提示行, 按钮需与首行输入框对齐 */
+  align-items: flex-start;
   gap: 10px;
   padding-top: 12px;
   border-top: 1px solid #f0f2f5;
 }
-.input-bar .el-textarea {
+.input-main {
   flex: 1;
+  min-width: 0;
+}
+.input-main :deep(.el-textarea__inner) {
+  line-height: 1.6;
+}
+/* 意图提示: 输入框下方一行, 不占额外高度时自动隐藏 */
+.intent-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  margin-top: 4px;
+  padding-left: 2px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 20px;
+}
+.intent-loading {
+  color: #c0c4cc;
+}
+.intent-conf {
+  color: #909399;
+}
+.intent-method {
+  color: #c0c4cc;
 }
 .send-btn {
   width: 84px;
