@@ -130,6 +130,8 @@
                 show-word-limit
                 maxlength="100000"
               />
+              <!-- 内容识别: 粘贴的可能是简历/新闻/小说, 提交前先提示 -->
+              <DocCheckBadge :check="pasteCheck" />
               <div class="pane-actions">
                 <el-button
                   type="primary"
@@ -275,7 +277,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
 import {
@@ -293,7 +295,7 @@ import {
 import AppImage from '@/components/AppImage.vue'
 import DocCheckBadge from '@/components/DocCheckBadge.vue'
 import { contractApi } from '@/api/contract'
-import { ingestApi, type FileIngestResponse, type UrlIngestResponse } from '@/api/ingest'
+import { ingestApi, type DocCheck, type FileIngestResponse, type UrlIngestResponse } from '@/api/ingest'
 import { levelMeta } from '@/utils/contractDisplay'
 
 const route = useRoute()
@@ -312,6 +314,43 @@ const urlInput = ref('')
 const urlText = ref('')
 const urlMeta = ref<UrlIngestResponse | null>(null)
 const urlParsing = ref(false)
+
+// ── 粘贴入口: 提交前轻量判定 (与文件/链接入口一致的内联提示) ──
+const pasteCheck = ref<DocCheck | null>(null)
+const _PASTE_MIN_LEN = 20 // 少于 20 字不识别, 避免输入过程中的噪音请求
+const _PASTE_DEBOUNCE = 500 // ms, 停止输入后再请求
+let pasteTimer: ReturnType<typeof setTimeout> | null = null
+let pasteSeq = 0 // 请求序号: 后发覆盖先发, 丢弃过期响应
+
+const clearPasteTimer = () => {
+  if (pasteTimer !== null) {
+    clearTimeout(pasteTimer)
+    pasteTimer = null
+  }
+}
+
+watch(pasteText, (val) => {
+  clearPasteTimer()
+  const q = (val || '').trim()
+  if (q.length < _PASTE_MIN_LEN || analyzing.value) {
+    pasteSeq++ // 使在途请求失效
+    pasteCheck.value = null
+    return
+  }
+  const seq = ++pasteSeq
+  pasteTimer = setTimeout(async () => {
+    pasteTimer = null
+    if (analyzing.value) return
+    try {
+      const { data } = await ingestApi.checkText(q)
+      if (seq !== pasteSeq) return // 已有更新的输入, 丢弃本次结果
+      pasteCheck.value = data.doc_check ?? null
+    } catch {
+      if (seq === pasteSeq) pasteCheck.value = null // 静默失败, 不打扰用户
+    }
+  }, _PASTE_DEBOUNCE)
+})
+
 
 const stage = ref<'upload' | 'analyzing' | 'done' | 'failed'>('upload')
 const analyzing = computed(() => stage.value === 'analyzing')
@@ -547,6 +586,8 @@ const resetTask = () => {
   urlText.value = ''
   urlInput.value = ''
   pasteText.value = ''
+  pasteCheck.value = null
+  clearPasteTimer()
   risks.value = []
   if (imagePreview.value) {
     URL.revokeObjectURL(imagePreview.value)

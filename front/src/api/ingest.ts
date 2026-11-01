@@ -34,6 +34,14 @@ export interface UrlIngestResponse {
   doc_check?: DocCheck
 }
 
+/** 纯文本预览判定响应 (粘贴入口提交前轻量判定) */
+export interface TextIngestResponse {
+  char_count: number
+  text: string
+  truncated: boolean
+  doc_check?: DocCheck
+}
+
 export const ingestApi = {
   /** multipart 上传走 axios 拦截器, 自动携带 Bearer token */
   async uploadFile(file: File) {
@@ -47,6 +55,11 @@ export const ingestApi = {
   },
   async ingestUrl(url: string) {
     const { data } = await apiClient.post<UrlIngestResponse>('/ingest/url', { url }, { timeout: 30000 })
+    return data
+  },
+  /** 纯文本预览判定: 粘贴入口在提交前调用, 不落库 */
+  async checkText(text: string) {
+    const { data } = await apiClient.post<TextIngestResponse>('/ingest/text', { text }, { timeout: 20000 })
     return data
   },
 }

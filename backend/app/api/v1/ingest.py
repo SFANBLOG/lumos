@@ -64,6 +64,12 @@ class UrlIngestRequest(BaseModel):
     url: str = Field(..., min_length=8, max_length=2048, description="目标网页链接")
 
 
+class TextIngestRequest(BaseModel):
+    """纯文本导入请求 (粘贴入口预览判定用)."""
+
+    text: str = Field(..., min_length=1, max_length=100_000, description="粘贴的合同/条款文本")
+
+
 @router.post(
     "/file",
     summary="上传文件并抽取文本",
@@ -180,6 +186,26 @@ async def ingest_url(
     return {
         "url": str(resp.url),
         "title": title,
+        "char_count": len(text),
+        "text": text,
+        "truncated": truncated,
+        "doc_check": doc_check.to_dict(),
+    }
+
+
+@router.post(
+    "/text",
+    summary="纯文本预览判定 (不落库)",
+    description="粘贴入口在提交前做一次轻量判定, 返回 doc_check 供前端即时提示; 不写 MinIO、不落库。",
+)
+async def ingest_text(
+    _auth: AuthAny,
+    req: TextIngestRequest,
+) -> dict:
+    text, truncated = truncate(req.text)
+    # 仅规则判定即可满足预览需求, 避免每次输入停顿都触发大模型调用
+    doc_check = await check_document(text, use_llm=False)
+    return {
         "char_count": len(text),
         "text": text,
         "truncated": truncated,
