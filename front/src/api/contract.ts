@@ -4,6 +4,8 @@ export interface ContractSubmitRequest {
   text: string
   source?: string
   page_count?: number
+  /** 内容判定为「非合同」时, 用户二次确认后传 true 强制继续分析 */
+  force?: boolean
 }
 
 export interface ContractSubmitResponse {
@@ -18,6 +20,8 @@ export interface ContractListItem {
   source: string
   status: string
   char_count: number | null
+  doc_type?: string | null
+  doc_check_note?: string | null
   created_at: string
   preview: string
 }
@@ -58,6 +62,8 @@ export interface AnalysisReport {
   overall_level: string
   summary: string
   risk_items: RiskItemData[]
+  /** 内容提示: 提交内容被判定为疑似非合同时给出 */
+  content_notice?: string | null
   analyzed_at: string
 }
 

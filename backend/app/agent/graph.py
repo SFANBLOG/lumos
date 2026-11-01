@@ -32,6 +32,7 @@ from app.agent.sub_agents.negotiator_agent import NegotiatorAgent
 from app.agent.sub_agents.retriever_agent import RetrieverAgent
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
 from app.models.analysis import AnalysisResult, RiskItem
+from app.models.contract import Contract
 from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 
 #: 工作流节点序列 (线性链, 顺序即执行顺序)
@@ -181,8 +182,9 @@ async def run_contract_analysis(
         )
         return
 
+    content_notice: str | None = None
     if session is not None:
-        await _persist(final_state, session)
+        content_notice = await _persist(final_state, session)
 
     yield SSEEvent(
         event=SSEEventType.SUMMARY,
@@ -196,6 +198,8 @@ async def run_contract_analysis(
             "confidence_score": final_state.confidence_score,
             "quality_issues": final_state.quality_issues,
             "contract_facts": final_state.contract_facts,
+            # 内容提示: 提交内容被判定为疑似非合同时非空, 前端据此在报告顶部标注
+            "content_notice": content_notice,
         },
     )
 
@@ -210,14 +214,24 @@ async def run_contract_analysis(
     )
 
 
-async def _persist(state: AgentState, session: AsyncSession) -> None:
-    """将分析结果与风险条目持久化到数据库."""
+async def _persist(state: AgentState, session: AsyncSession) -> str | None:
+    """将分析结果与风险条目持久化到数据库.
+
+    Returns:
+        内容提示文案 (提交内容被判定为疑似非合同时), 无提示时为 None.
+    """
     try:
+        # 内容体检结论在提交时已落库, 这里读回来给报告加顶部标注:
+        # 非合同内容也允许 force 继续, 但结论必须明确告知"仅供参考".
+        contract = await session.get(Contract, state.contract_id)
+        notice = contract.doc_check_note if contract is not None else None
+        summary = f"【内容提示】{notice}\n\n{state.summary}" if notice else state.summary
+
         analysis = AnalysisResult(
             contract_id=state.contract_id,
             overall_score=state.overall_score,
             overall_level=state.overall_level,
-            summary=state.summary,
+            summary=summary,
         )
         session.add(analysis)
         await session.flush()
@@ -243,6 +257,8 @@ async def _persist(state: AgentState, session: AsyncSession) -> None:
             f"💾 结果已持久化 | 合同ID: {state.contract_id} | "
             f"风险: {len(state.risk_assessments)} 条"
         )
+        return notice
     except Exception as e:
         logger.error(f"💾 持久化失败: {e}")
         await session.rollback()
+        return None

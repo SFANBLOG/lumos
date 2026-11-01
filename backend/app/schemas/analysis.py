@@ -73,6 +73,10 @@ class AnalysisReportResponse(BaseModel):
         default_factory=list,
         description="逐条风险清单 (按危险程度排序)",
     )
+    content_notice: str | None = Field(
+        default=None,
+        description="内容提示 (提交内容被判定为疑似非合同时给出, 供报告顶部标注)",
+    )
     analyzed_at: datetime
 
     model_config = {"from_attributes": True}

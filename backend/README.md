@@ -119,6 +119,24 @@ python -m eval.retrieval_eval --topk 5
 | `GET` | `/consult/sessions` | 会话列表 |
 | `GET` | `/consult/sessions/{id}/messages` | 会话消息 |
 | `DELETE` | `/consult/sessions/{id}` | 删除会话 |
+| `POST` | `/consult/intent` | 提问意图识别（规则 + 模型兜底） |
+
+## 内容体检: 提交的到底是不是合同
+
+用户可能上传简历、发票、表格, 或把新闻正文、小说贴进来。旧链路只要扩展名白名单通过
+就会切成"条款"并产出报告, 是幻觉的主要来源。现在三层把关:
+
+| 层 | 位置 | 作用 |
+|:---|:---|:---|
+| L0 magic bytes | `app/services/file_signature.py` | 校验文件头与后缀一致 (改后缀的 zip/图片直接 415) |
+| L1 规则判定 | `app/services/contract_guard.py` | 长度 / 中文占比 / 乱码率 / 合同要素 / 噪声特征 → `doc_type` + 置信度 |
+| L2 模型兜底 | 同上 `_classify_by_llm` | 仅规则低置信度时调用, 异常一律降级为规则结果 |
+
+- `/ingest/file`、`/ingest/url` 响应新增 `doc_check` 字段, 前端解析后立即展示类型与提示;
+- `POST /contracts` 服务端重跑一次判定 (不信任前端): 非合同返回 `422`, `detail` 为
+  `{message, doc_check}`; 用户二次确认后带 `force=true` 才放行;
+- 判定结论落库到 `contracts.doc_type / doc_confidence / doc_check_method / doc_check_note`,
+  放行后的分析报告会在 `summary` 前加 `【内容提示】…`, 并以 `content_notice` 下发。
 
 ## 关键环境变量
 

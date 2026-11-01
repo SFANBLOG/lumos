@@ -87,6 +87,8 @@
                     :closable="false"
                     class="truncate-alert"
                   />
+                  <!-- 内容识别: 上传的可能是简历/发票/表格, 先告知再提交 -->
+                  <DocCheckBadge :check="fileMeta.doc_check" />
                   <el-input
                     v-model="fileText"
                     type="textarea"
@@ -174,6 +176,8 @@
                   <span class="meta-sub">已抽取 {{ urlMeta.char_count }} 字</span>
                   <el-button link type="danger" @click="clearUrlTab">移除</el-button>
                 </div>
+                <!-- 内容识别: 新闻/商品页/博客不是合同, 解析后立刻提示 -->
+                <DocCheckBadge :check="urlMeta.doc_check" />
                 <el-input v-model="urlText" type="textarea" :rows="9" placeholder="解析出的正文，可编辑后分析…" />
                 <div class="pane-actions">
                   <el-button
@@ -222,6 +226,14 @@
       <div v-else-if="stage === 'done'" class="done-stage">
         <div class="done-icon"><el-icon><CircleCheckFilled /></el-icon></div>
         <h2>AI 初审已完成</h2>
+        <!-- 内容提示: 提交内容被判定为疑似非合同时, 报告顶部同步标注 -->
+        <el-alert
+          v-if="contentNotice"
+          :title="contentNotice"
+          type="warning"
+          :closable="false"
+          class="content-notice"
+        />
         <p>共发现 {{ risks.length }} 项风险，可进入初审页逐条核对原文并生成报告。</p>
         <div class="done-actions">
           <el-button type="primary" size="large" @click="goReview">查看 AI 初审</el-button>
@@ -265,7 +277,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
+import { ElMessage, ElMessageBox, type UploadRawFile, type UploadRequestOptions } from 'element-plus'
 import {
   CircleCheckFilled,
   Document,
@@ -279,6 +291,7 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import AppImage from '@/components/AppImage.vue'
+import DocCheckBadge from '@/components/DocCheckBadge.vue'
 import { contractApi } from '@/api/contract'
 import { ingestApi, type FileIngestResponse, type UrlIngestResponse } from '@/api/ingest'
 import { levelMeta } from '@/utils/contractDisplay'
@@ -304,6 +317,7 @@ const stage = ref<'upload' | 'analyzing' | 'done' | 'failed'>('upload')
 const analyzing = computed(() => stage.value === 'analyzing')
 const progress = ref(0)
 const statusMessage = ref('')
+const contentNotice = ref('')
 const risks = ref<any[]>([])
 const contractId = ref('')
 let eventSource: EventSource | null = null
@@ -402,6 +416,30 @@ const stopProgressTimer = () => {
   }
 }
 
+/**
+ * 提交合同; 服务端判定内容不是合同时返回 422 + doc_check, 弹二次确认,
+ * 用户确认后带 force=true 重提 (报告里会标注「内容提示」)。
+ */
+const submitWithConfirm = async (text: string, source: string) => {
+  const payload = { text, source }
+  try {
+    return await contractApi.submit(payload)
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail
+    const blocked =
+      e?.response?.status === 422 && detail && typeof detail === 'object' && detail.doc_check
+    if (!blocked) throw e
+    const check = detail.doc_check
+    const pct = Math.round((check.confidence ?? 0) * 100)
+    await ElMessageBox.confirm(
+      `${detail.message || '内容可能不是合同'}\n\n识别类型：${check.doc_type_label}（置信度 ${pct}%）。继续分析可能得到不准确的结论。`,
+      '内容可能不是合同',
+      { confirmButtonText: '仍然继续', cancelButtonText: '返回修改', type: 'warning' }
+    )
+    return await contractApi.submit({ ...payload, force: true })
+  }
+}
+
 const start = async (tab: TabName) => {
   const text = tab === 'text' ? pasteText.value : tab === 'file' ? fileText.value : urlText.value
   if (text.trim().length < 10) {
@@ -411,12 +449,13 @@ const start = async (tab: TabName) => {
   stage.value = 'analyzing'
   progress.value = 0.06
   statusMessage.value = '正在提交合同…'
+  contentNotice.value = ''
   risks.value = []
   contractId.value = ''
   startProgressTimer()
 
   try {
-    const { data } = await contractApi.submit({ text, source: sourceFor(tab) })
+    const { data } = await submitWithConfirm(text, sourceFor(tab))
     contractId.value = data.contract_id
     statusMessage.value = data.message
     try {
@@ -426,10 +465,18 @@ const start = async (tab: TabName) => {
     }
     eventSource = contractApi.stream(data.contract_id, (event) => handleEvent(event))
   } catch (e: any) {
-    ElMessage.error(e.response?.data?.detail || '提交失败')
-    stage.value = 'failed'
-    statusMessage.value = e.response?.data?.detail || '提交失败'
     stopProgressTimer()
+    // 用户在「内容可能不是合同」弹窗里选择返回修改: 静默回到上传态
+    if (e === 'cancel' || e === 'close') {
+      stage.value = 'upload'
+      statusMessage.value = ''
+      return
+    }
+    const detail = e.response?.data?.detail
+    const message = typeof detail === 'string' ? detail : detail?.message || '提交失败'
+    ElMessage.error(message)
+    stage.value = 'failed'
+    statusMessage.value = message
   }
 }
 
@@ -451,6 +498,7 @@ const handleEvent = (event: { event: string; data: any }) => {
       break
     case 'summary':
       statusMessage.value = event.data.summary || '分析完成'
+      contentNotice.value = event.data.content_notice || ''
       break
     case 'complete':
       progress.value = 1
@@ -775,6 +823,12 @@ onBeforeUnmount(() => {
 .progress-wrap {
   width: min(520px, 86%);
   margin: 26px 0 20px;
+}
+/* 内容提示: 疑似非合同时的报告标注 */
+.content-notice {
+  width: min(560px, 92%);
+  margin-top: 14px;
+  text-align: left;
 }
 .flow-progress :deep(.el-progress-bar__outer) {
   background: #f0edfd;

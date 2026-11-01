@@ -72,6 +72,27 @@ class Contract(SQLModel, table=True):
     char_count: int | None = Field(default=None, description="字符数")
     device_id: str | None = Field(default=None, description="来源设备标识")
 
+    # ---- 内容体检 (提交时判定文档类型, 非合同内容也能留痕) ----
+    doc_type: str | None = Field(
+        default=None,
+        max_length=32,
+        description="判定出的文档类型 (labor_contract/news_article/...)",
+    )
+    doc_confidence: float | None = Field(
+        default=None,
+        description="文档类型判定置信度 (0~1)",
+    )
+    doc_check_method: str | None = Field(
+        default=None,
+        max_length=16,
+        description="判定方式: rule/llm/ext",
+    )
+    doc_check_note: str | None = Field(
+        default=None,
+        max_length=255,
+        description="内容提示文案 (空表示无需提示), 会写进分析报告",
+    )
+
     # ---- 时间 ----
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

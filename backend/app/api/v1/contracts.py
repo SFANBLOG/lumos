@@ -23,6 +23,7 @@ from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
 from app.services import analysis_task
 from app.services.audit import record_audit_event
+from app.services.contract_guard import check_document
 from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse
 from app.schemas.contract import (
     ContractCreateRequest,
@@ -42,6 +43,8 @@ async def _to_list_item(contract: Contract) -> dict:
         "source": contract.source,
         "status": contract.status,
         "char_count": contract.char_count,
+        "doc_type": contract.doc_type,
+        "doc_check_note": contract.doc_check_note,
         "created_at": contract.created_at,
         "preview": (contract.raw_text or "")[:80],
     }
@@ -171,6 +174,22 @@ async def submit_contract(
         f"字数: {len(request.text)}"
     )
 
+    # 服务端重跑一次文档类型判定: 不能只依赖前端传参 (接口可被直接调用).
+    # 非合同内容默认拦截, 用户二次确认后带 force=true 才放行, 并在报告里标注。
+    doc_check = await check_document(request.text)
+    if not doc_check.is_contract and not request.force:
+        logger.warning(
+            f"⛔ 内容判定为非合同, 已拦截 | 类型: {doc_check.doc_type.value} | "
+            f"置信度: {doc_check.confidence}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": doc_check.notice or "内容可能不是合同，无法进行合同风险审查",
+                "doc_check": doc_check.to_dict(),
+            },
+        )
+
     # 创建合同记录
     contract = Contract(
         raw_text=request.text,
@@ -179,6 +198,10 @@ async def submit_contract(
         page_count=request.page_count,
         char_count=len(request.text),
         device_id=request.device_id,
+        doc_type=doc_check.doc_type.value,
+        doc_confidence=doc_check.confidence,
+        doc_check_method=doc_check.method,
+        doc_check_note=doc_check.notice,
     )
 
     session.add(contract)
@@ -324,6 +347,7 @@ async def get_report(
         overall_level=analysis.overall_level,
         summary=analysis.summary,
         risk_items=[RiskItemResponse.model_validate(item) for item in risk_items],
+        content_notice=contract.doc_check_note,
         analyzed_at=analysis.created_at,
     )
 

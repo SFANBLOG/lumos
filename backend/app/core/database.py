@@ -83,6 +83,27 @@ async def init_db() -> None:
                     "WHERE role IN ('owner', 'admin', 'auditor', 'member')"
                 )
             )
+            # contracts 新增「内容体检」列: 旧库缺列时写入合同记录会直接 500。
+            # 逐列按 information_schema 判断后 ADD, 不依赖 MySQL 的 IF NOT EXISTS
+            # (该语法在 MySQL 上并不存在, 只有 MariaDB 支持)。
+            for column, ddl in (
+                ("doc_type", "VARCHAR(32) NULL"),
+                ("doc_confidence", "FLOAT NULL"),
+                ("doc_check_method", "VARCHAR(16) NULL"),
+                ("doc_check_note", "VARCHAR(255) NULL"),
+            ):
+                exists = await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'contracts' "
+                        "AND COLUMN_NAME = :col"
+                    ),
+                    {"col": column},
+                )
+                if exists.scalar_one() == 0:
+                    await conn.execute(
+                        text(f"ALTER TABLE contracts ADD COLUMN {column} {ddl}")
+                    )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

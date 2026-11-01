@@ -1,5 +1,18 @@
 import apiClient from './client'
 
+/** 文档类型判定结果 (后端 services/contract_guard.py 下发) */
+export interface DocCheck {
+  doc_type: string
+  doc_type_label: string
+  is_contract: boolean
+  confidence: number
+  /** rule=规则判定 llm=模型判定 ext=文件类型判定 */
+  method: string
+  reasons: string[]
+  /** 给用户看的提示文案, 空表示无需提示 */
+  notice: string | null
+}
+
 export interface FileIngestResponse {
   filename: string
   ext: string
@@ -9,6 +22,7 @@ export interface FileIngestResponse {
   truncated: boolean
   scanned: boolean
   object_name: string
+  doc_check?: DocCheck
 }
 
 export interface UrlIngestResponse {
@@ -17,6 +31,7 @@ export interface UrlIngestResponse {
   char_count: number
   text: string
   truncated: boolean
+  doc_check?: DocCheck
 }
 
 export const ingestApi = {

@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import AuthAny
 from app.core.minio_client import StorageUnavailableError, upload_file
+from app.services.contract_guard import check_document
+from app.services.file_signature import verify_file_content
 from app.services.text_extractor import (
     ServiceNotReadyError,
     extract_by_ext,
@@ -86,6 +88,14 @@ async def ingest_file(
             detail="文件超过 10MB 上限",
         )
 
+    # L0: 文件头与后缀一致性校验 —— 改名换后缀的文件不进解析器
+    mismatch = verify_file_content(ext, data)
+    if mismatch:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=mismatch,
+        )
+
     # 原文存档 MinIO, 便于后续追溯
     object_name = f"ingest/{uuid.uuid4()}.{ext}"
     try:
@@ -107,6 +117,8 @@ async def ingest_file(
         ) from e
 
     text, truncated = truncate(text)
+    # L1+L2: 判定抽出的正文是不是合同, 结果随响应下发供前端即时提示
+    doc_check = await check_document(text, ext=ext)
     return {
         "filename": filename,
         "ext": ext,
@@ -116,6 +128,7 @@ async def ingest_file(
         "truncated": truncated,
         "scanned": scanned,
         "object_name": object_name,
+        "doc_check": doc_check.to_dict(),
     }
 
 
@@ -162,10 +175,13 @@ async def ingest_url(
 
     title, text = html_to_text(resp.text)
     text, truncated = truncate(text)
+    # L1+L2: 网页正文同样要判定是不是合同 (新闻/商品页/博客会被识别出来)
+    doc_check = await check_document(text)
     return {
         "url": str(resp.url),
         "title": title,
         "char_count": len(text),
         "text": text,
         "truncated": truncated,
+        "doc_check": doc_check.to_dict(),
     }

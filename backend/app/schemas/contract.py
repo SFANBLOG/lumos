@@ -39,6 +39,10 @@ class ContractCreateRequest(BaseModel):
         max_length=128,
         description="客户端设备标识 (可选)",
     )
+    force: bool = Field(
+        default=False,
+        description="内容判定为「非合同」时是否仍然继续分析 (前端二次确认后传 true)",
+    )
 
 
 # ─── 响应 ──────────────────────────────────────────────────────
@@ -52,6 +56,10 @@ class ContractResponse(BaseModel):
     status: ContractStatus
     page_count: int | None
     char_count: int | None
+    doc_type: str | None = None
+    doc_confidence: float | None = None
+    doc_check_method: str | None = None
+    doc_check_note: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -74,6 +82,8 @@ class ContractListItem(BaseModel):
     source: ContractSource
     status: ContractStatus
     char_count: int | None
+    doc_type: str | None = None
+    doc_check_note: str | None = None
     created_at: datetime
     preview: str = Field(default="", description="正文前 80 字预览")
 
