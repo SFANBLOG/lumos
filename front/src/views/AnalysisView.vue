@@ -342,9 +342,9 @@ watch(pasteText, (val) => {
     pasteTimer = null
     if (analyzing.value) return
     try {
-      const { data } = await ingestApi.checkText(q)
+      const res = await ingestApi.checkText(q)
       if (seq !== pasteSeq) return // 已有更新的输入, 丢弃本次结果
-      pasteCheck.value = data.doc_check ?? null
+      pasteCheck.value = res.doc_check ?? null
     } catch {
       if (seq === pasteSeq) pasteCheck.value = null // 静默失败, 不打扰用户
     }

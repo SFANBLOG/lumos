@@ -6,15 +6,23 @@
 # ---- 阶段 1: 构建 ----
 FROM python:3.12-slim AS builder
 
-# 安装 uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# 国内镜像加速 (清华 PyPI): pip / uv 走清华源, 避免默认 PyPI 在本环境拉取缓慢
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 WORKDIR /app
 
 # 先复制依赖声明 (利用 Docker 层缓存)
 COPY pyproject.toml ./
 
-# 先装 CPU 版 torch (本服务纯 CPU 推理, 避免拉取 2.5GB 的 NVIDIA CUDA 运行库导致构建极慢/失败)
+# 安装 uv: 改用 pip 从国内源安装, 避免从 ghcr.io 拉取 uv 镜像 (本环境 ghcr 极慢)
+RUN pip install --no-cache-dir uv
+
+# torch 的部分纯 Python 依赖 (如 markupsafe) 在 PyTorch 索引上缺失/易超时,
+# 先从清华 PyPI 预装, 避免 torch 解析依赖时因拉不到 markupsafe 而失败
+RUN uv pip install --system --no-cache jinja2 markupsafe
+# 先装 CPU 版 torch (本服务纯 CPU 推理, 避免拉取 2.5GB 的 NVIDIA CUDA 运行库; 依赖已就绪, 不会中断)
+# 清华/USTC 等均未镜像 pytorch CPU wheel, 仍使用官方 CPU 索引 (download.pytorch.org)
 RUN uv pip install --system --no-cache torch --index-url https://download.pytorch.org/whl/cpu
 # 再装其余依赖 (torch 已满足 sentence-transformers 约束, 不会重复拉取 CUDA 版)
 RUN uv pip install --system --no-cache -r pyproject.toml
@@ -23,7 +31,21 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 FROM python:3.12-slim AS runtime
 
 # 系统依赖: Tesseract OCR (图片上传走 OCR 抽取文字, 含中文语言包)
-RUN apt-get update \
+# 改用清华 Debian 镜像源加速 apt。Debian trixie 默认使用 deb822 格式
+# (/etc/apt/sources.list.d/debian.sources); 旧版则在 /etc/apt/sources.list。两者都处理。
+RUN sed -i \
+      -e 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' \
+      -e 's|https://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' \
+      -e 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+      -e 's|https://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+      /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    sed -i \
+      -e 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' \
+      -e 's|https://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' \
+      -e 's|http://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+      -e 's|https://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' \
+      /etc/apt/sources.list 2>/dev/null || true; \
+    apt-get update \
     && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 
