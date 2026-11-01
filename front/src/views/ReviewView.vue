@@ -242,7 +242,9 @@ const loadContract = async () => {
     charCount.value = detail.char_count ?? 0
     contractCode.value = `CT-${String(detail.created_at).slice(0, 10).replace(/-/g, '')}-${id.slice(0, 3).toUpperCase()}`
     const cached = readCachedText(id)
-    contractText.value = cached || DEMO_CONTRACT_TEXT
+    // 优先会话缓存; 刷新/新标签页无缓存时回落到服务端原文; 最后才用演示文本
+    const serverText = typeof detail.raw_text === 'string' ? detail.raw_text.slice(0, 60000) : ''
+    contractText.value = cached || serverText || DEMO_CONTRACT_TEXT
     if (report && Array.isArray(report.risk_items)) {
       risks.value = report.risk_items
       reportSummary.value = report.summary

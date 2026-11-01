@@ -151,14 +151,66 @@ watch(pages, (list) => {
   if (current.value > list.length - 1) current.value = Math.max(0, list.length - 1)
 })
 
+/** 归一化: 移除所有空白, 便于跨行/跨折行匹配 */
+const stripSpace = (s: string) => (s || '').replace(/\s+/g, '')
+
+/**
+ * 在整篇正文中查找片段, 返回所在行号 (-1 未命中).
+ *
+ * 关键: 正文被 wrapText 按每行 28 字硬折行, 若逐行匹配, 条款的前 N 个字
+ * 一旦被折在相邻两行之间就永远匹配不到 (这正是「未找到完全匹配」的根因).
+ * 这里先把所有行拼成全文再 indexOf, 命中后把字符偏移映射回行号。
+ */
+const findLineByNeedle = (needle: string) => {
+  const target = stripSpace(needle)
+  if (!target) return -1
+  const norm = lines.value.map(stripSpace)
+  const full = norm.join('')
+  const pos = full.indexOf(target)
+  if (pos < 0) return -1
+  let acc = 0
+  for (let i = 0; i < norm.length; i += 1) {
+    acc += norm[i].length
+    if (pos < acc) return i
+  }
+  return norm.length - 1
+}
+
+/**
+ * 由原文条款构造多个候选 needle: 整体 → 逐渐缩短前缀 → 取中段。
+ * 报告里的条款可能与正文存在细微标点/空格/引导语差异, 逐级放宽可显著提升命中率。
+ */
+const buildNeedles = (clause: string) => {
+  const base = stripSpace(clause)
+  const out: string[] = []
+  const push = (s: string) => {
+    // 少于 6 字容易误命中其它位置, 不作为候选
+    if (s && s.length >= 6 && !out.includes(s)) out.push(s)
+  }
+  push(base)
+  if (base.length > 24) push(base.slice(0, 24))
+  if (base.length > 16) push(base.slice(0, 16))
+  if (base.length > 12) push(base.slice(0, 12))
+  if (base.length > 8) push(base.slice(0, 8))
+  // 开头可能带有「第X条」等正文中不存在的前缀, 取中段再试一次
+  if (base.length > 18) push(base.slice(4, 18))
+  return out
+}
+
 /** 供父组件按条款原文定位页码（AI 初审「定位原文」） */
 const locate = (keyword: string) => {
-  const needle = (keyword || '').replace(/\s+/g, '').slice(0, 12)
-  if (!needle) return false
-  const index = lines.value.findIndex((line) => line.replace(/\s+/g, '').includes(needle))
-  if (index < 0) return false
-  current.value = Math.floor(index / props.pageLineCount)
-  return true
+  const raw = (keyword || '').trim()
+  if (!raw) return false
+  for (const needle of buildNeedles(raw)) {
+    const lineIndex = findLineByNeedle(needle)
+    if (lineIndex >= 0) {
+      const total = Math.max(1, pages.value.length)
+      const page = Math.floor(lineIndex / props.pageLineCount)
+      current.value = Math.min(Math.max(0, page), total - 1)
+      return true
+    }
+  }
+  return false
 }
 
 defineExpose({ locate })

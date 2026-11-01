@@ -56,6 +56,7 @@ class ContractResponse(BaseModel):
     status: ContractStatus
     page_count: int | None
     char_count: int | None
+    raw_text: str | None = Field(default=None, description="合同原文 (供前端渲染文档与定位原文)")
     doc_type: str | None = None
     doc_confidence: float | None = None
     doc_check_method: str | None = None
