@@ -37,6 +37,8 @@ archive/
 .env.*.local
 *.log
 *.ses
+# 本地 embedding 模型 (backend/models/bge-base-zh-v1.5 等, 数百 MB, 不入库)
+backend/models/
 
 # ===== Personal interview-prep docs (not project source) =====
 简历_项目介绍.md

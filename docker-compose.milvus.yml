@@ -1,0 +1,46 @@
+# Milvus 独立编排 (混合检索的向量通道)
+#
+# 单容器 standalone: 内嵌 etcd (ETCD_USE_EMBED) + 本地存储 (COMMON_STORAGETYPE=local),
+# 不依赖外部 etcd / minio, 避免国内拉取 quay.io 镜像失败。
+#
+# 用法:
+#   docker compose -f docker-compose.milvus.yml up -d
+#   docker compose -f docker-compose.milvus.yml logs -f milvus
+#
+# 接入已运行的后端 (docker-compose.yml 里的 lumos 栈):
+#   backend 容器内设 MILVUS_HOST=milvus, 与新服务同处 lumos_default 网络。
+#   宿主机进程调试则用 MILVUS_HOST=localhost (端口已映射到 19530)。
+services:
+  milvus:
+    image: milvusdb/milvus:v2.5.4
+    container_name: lumos-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_USE_EMBED: "true"
+      ETCD_DATA_DIR: /var/lib/milvus/etcd
+      ETCD_CONFIG_PATH: /milvus/configs/advanced/etcd.yaml
+      COMMON_STORAGETYPE: local
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"   # gRPC (pymilvus)
+      - "9091:9091"     # metrics / healthz
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - lumos
+
+volumes:
+  milvus_data:
+
+networks:
+  lumos:
+    external: true
+    name: lumos_default
