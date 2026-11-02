@@ -53,6 +53,10 @@ _AGENTS: dict[str, BaseAgent] = {
     ]
 }
 
+#: 关键节点: 一旦执行失败, 风险结论即失去依据 (条款没抽出来 / 没真正审过),
+#: 此时必须显式失败, 不能再用「0 风险 / 已完成」冒充审查通过
+_CRITICAL_NODES: frozenset[str] = frozenset({"extractor", "reviewer"})
+
 
 def _node_action(agent: BaseAgent, idx: int, total: int) -> Any:
     """构造 LangGraph 节点动作.
@@ -67,6 +71,9 @@ def _node_action(agent: BaseAgent, idx: int, total: int) -> Any:
 
         events: list[SSEEvent] = []
         if len(state.errors) > prev_error_len:
+            if agent.name in _CRITICAL_NODES:
+                # 关键节点失败: 标记降级, 全图结束后不再产出「已完成」报告
+                state.ai_degraded = True
             events.append(
                 SSEEvent(
                     event=SSEEventType.THINKING,
@@ -179,6 +186,20 @@ async def run_contract_analysis(
         yield SSEEvent(
             event=SSEEventType.ERROR,
             data={"message": f"分析引擎异常: {e}"},
+        )
+        return
+
+    # AI 不可用 / 关键节点失败导致降级: 不产出「已完成」报告, 直接报错,
+    # 避免把未完成的审查当成「低风险 / 0 问题」的合规结论 (假阴性)
+    if final_state.ai_degraded:
+        logger.error(f"⚠️ AI 审查未完成 (降级) | 合同ID: {contract_id}")
+        yield SSEEvent(
+            event=SSEEventType.ERROR,
+            data={
+                "message": "本次审查未能完成：AI 深度分析不可用或审查引擎异常"
+                "（常见原因：API Key 无效、额度不足、网络故障）。"
+                "请检查大模型配置后重新审查，切勿据此放行合同。"
+            },
         )
         return
 

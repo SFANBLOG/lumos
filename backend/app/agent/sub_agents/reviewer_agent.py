@@ -211,11 +211,14 @@ class ReviewerAgent(BaseAgent):
                     )
                 )
         state.risk_assessments = assessments
-        state.overall_score = 50 if assessments else 80
-        state.overall_level = RiskLevel.MEDIUM if assessments else RiskLevel.LOW
+        # AI 审查失败: 标记降级, 上层将拒绝产出「已完成」报告,
+        # 避免把未完成的审查误报为「低风险 / 0 问题」
+        state.ai_degraded = True
+        state.overall_score = 0
+        state.overall_level = RiskLevel.MEDIUM
         state.summary = (
-            f"⚠️ AI 深度分析暂不可用，已使用规则引擎完成初步审查。"
-            f"共发现 {len(assessments)} 项需关注条款。"
+            "⚠️ AI 深度分析不可用，本次未能完成真实的风险识别；"
+            "降级提示仅供参考，不可作为合规判断或放行依据。"
         )
 
     @staticmethod

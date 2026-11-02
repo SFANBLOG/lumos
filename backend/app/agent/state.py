@@ -104,6 +104,9 @@ class AgentState(BaseModel):
     # ── 流程控制 ──
     current_node: str = Field(default="", description="当前执行的节点名称")
     errors: list[str] = Field(default_factory=list, description="错误信息收集")
+    # AI 大模型不可用 (Key 无效/额度不足/网络故障) 时置 True:
+    # 上层据此拒绝产出「已完成/低风险」报告, 避免把未完成的审查误报为安全
+    ai_degraded: bool = Field(default=False, description="AI 模型不可用导致审查降级")
     agent_trace: list[str] = Field(
         default_factory=list,
         description="已执行的子智能体名称列表 (执行轨迹)",

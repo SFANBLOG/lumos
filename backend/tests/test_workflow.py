@@ -168,10 +168,10 @@ class TestWorkflowGraph:
         assert summary.data["total_risks"] == 1
         assert summary.data["overall_score"] == 45
 
-    def test_node_error_emits_thinking_and_finishes(
+    def test_reviewer_error_fails_loud(
         self, monkeypatch, fake_llm, fake_mcp
     ) -> None:
-        """reviewer 运行期异常 → BaseAgent 捕获 → THINKING 提示, 流程继续."""
+        """reviewer 运行期异常 → THINKING 提示 + 显式 ERROR (不得产出「已完成」报告)."""
 
         async def broken_reviewer_run(self: ReviewerAgent, state: AgentState) -> AgentState:
             raise RuntimeError("审查引擎内部错误")
@@ -182,12 +182,35 @@ class TestWorkflowGraph:
         )
         seq = [e.event for e in events]
         assert SSEEventType.THINKING in seq
-        assert SSEEventType.SUMMARY in seq
-        assert SSEEventType.COMPLETE in seq
-        summary = next(e for e in events if e.event == SSEEventType.SUMMARY)
-        # extractor/retriever 正常推进; reviewer 失败不阻断后续节点
-        assert summary.data["total_clauses"] == 2
-        assert summary.data["total_risks"] == 0
+        assert seq[-1] == SSEEventType.ERROR
+        # 审查未真正执行: 不能以「0 风险 → 完成」收尾
+        assert SSEEventType.SUMMARY not in seq
+        assert SSEEventType.COMPLETE not in seq
+
+    def test_reviewer_llm_unavailable_fails_loud(
+        self, monkeypatch, fake_mcp
+    ) -> None:
+        """大模型不可用 (无效 Key/额度不足) → 降级不当结论, 直接 ERROR."""
+
+        async def broken_invoke(
+            self: BaseAgent,
+            user_message: str,
+            *,
+            temperature: float | None = None,
+            max_tokens: int = 4096,
+        ) -> str:
+            if self.name == "extractor":
+                return _EXTRACTOR_JSON
+            raise RuntimeError("Error code: 401 - Invalid API key")
+
+        monkeypatch.setattr(BaseAgent, "invoke_llm", broken_invoke)
+        events = _collect(
+            run_contract_analysis(contract_id="t-nollm", raw_text=_CONTRACT_TEXT)
+        )
+        seq = [e.event for e in events]
+        assert seq[-1] == SSEEventType.ERROR
+        assert SSEEventType.SUMMARY not in seq
+        assert SSEEventType.COMPLETE not in seq
 
 
 class TestAnalysisTaskBuffer:
