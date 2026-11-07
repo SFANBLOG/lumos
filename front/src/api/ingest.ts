@@ -13,6 +13,19 @@ export interface DocCheck {
   notice: string | null
 }
 
+/** PDF 解析链路元信息 (后端 services/mineru_parser.py 下发) */
+export interface ParseMeta {
+  /** mineru=MinerU 版面解析, legacy=内置 pypdf/PyMuPDF/OCR */
+  parser: string
+  /** 具体引擎: mineru:cli:v4 | mineru:cli:v2 | mineru:http | 内置链路描述 */
+  detail: string
+  blocks: number
+  images: number
+  vision_enriched: number
+  /** auto 策略回退原因, 空表示未回退 */
+  fallback_reason: string
+}
+
 export interface FileIngestResponse {
   filename: string
   ext: string
@@ -23,6 +36,7 @@ export interface FileIngestResponse {
   scanned: boolean
   object_name: string
   doc_check?: DocCheck
+  parse_meta?: ParseMeta
 }
 
 export interface UrlIngestResponse {

@@ -46,6 +46,7 @@
 |---|---|
 | **十大坑点智能检测** | 深度适配中国劳动法，自动扫描竞业禁止、试用期不缴社保、变相扣薪、含糊岗位职责、苛刻离职审批等 **10 类风险条款** |
 | **拍照即查** | 纸质合同拍照上传，端侧 OCR + 服务端多模态 LLM 双重文字抽取；PDF/Word 同样支持，**扫描版/混排版 PDF 逐页自动 OCR**（无文字层的页渲染位图后识别） |
+| **MinerU 版面解析** | 复杂版面的合同 PDF 可选接入 **MinerU**（本机 `mineru-kit` / `mineru` CLI 或内网 HTTP 解析服务）做版面检测、阅读顺序还原、表格/公式识别与 OCR，输出 Markdown + `content_list` 结构化块；版面中切出的公章/签名/手写批注图片块再交给**多模态视觉大模型**补识并回填原位置。未安装 MinerU 时自动回退内置 pypdf + PyMuPDF + OCR 链路，`/ingest/file` 返回 `parse_meta` 说明本次解析引擎与回退原因（详见 §5.2） |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
 | **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
@@ -107,6 +108,8 @@
 | Milvus | 向量数据库（COSINE，动态维度）；不可用时向量通道自动关闭，仅保留 BM25 关键词检索 |
 | BM25 (jieba) | 法条语料全文关键词通道（零分未命中文档不进候选），与向量通道经 **RRF** 融合；相关度分数 = 向量余弦与 BM25 归一分加权（单通道命中打折） |
 | Reranker（精排） | RRF 融合候选再经 `rerank_candidates` 精排：默认轻量可解释精排（召回分 + 词覆盖 + 标题命中加权），可选 CrossEncoder（`BAAI/bge-reranker-base`）语义重排，并按相似度阈值过滤后取 Top-K |
+| MinerU（可选） | 复杂版面 PDF → Markdown/JSON：`services/mineru_parser.py` 适配本机 CLI（4.x `mineru-kit parse` / 2.x `mineru -p`）与内网 HTTP 服务（`scripts/mineru_http_server.py`）；未安装自动回退内置链路，不影响服务启动 |
+| 多模态视觉大模型 | 通义千问 VL（OpenAI 兼容）用于合同拍照/扫描件 OCR，以及 MinerU 版面图片块（公章/签名/手写批注）的语义补识；`auto` 策略失败回退本地 Tesseract |
 | MinIO | 对象存储，合同文件与扫描件上传 |
 | A2A（Agent2Agent Protocol） | 标准 Agent 协议集成层（`app/a2a`）：Agent Card 自描述 + JSON-RPC 2.0（`/a2a`）+ SSE 流式（`/a2a/stream`），复用 LangGraph 工作流对外提供能力 |
 
@@ -204,6 +207,44 @@ sequenceDiagram
 ```
 
 各节点通过 `graph.astream` 推进：节点内产生的 `THINKING / NODE_COMPLETE / RISK_FOUND` 事件按序累积进 `state.events`，runner 增量回放，`NODE_START` 按图顺序预推——保持「节点开始 → 思考 → 完成」的原始时间线语义。任一节点异常不中断全图：子智能体捕获错误写入 `state.errors` 并转为 `THINKING` 警告事件继续执行。
+
+---
+
+### 5.2 MinerU 版面解析 + 多模态视觉模型（文档接入层）
+
+> 目标：把复杂版面的合同 PDF 稳定变成 LLM 可读、可溯源的 Markdown，而不是靠 `pypdf.extract_text()` 硬抽。完整实现见 `backend/app/services/mineru_parser.py`。
+
+**链路**：`上传 PDF` → `MinerU 版面检测 / 阅读顺序还原 / 表格·公式识别 / OCR` → `Markdown + content_list 结构化块` → `图片块交多模态视觉模型补识` → `text_extractor → ExtractorAgent 条款结构化 → 混合检索 RAG → Reviewer`。
+
+**三种策略（`PDF_PARSER_STRATEGY`）**
+
+| 策略 | 行为 |
+|---|---|
+| `auto`（默认） | 探测到本机 MinerU CLI 或配置了内网解析服务就走 MinerU；不可用 / 超时 / 输出为空自动回退内置 `pypdf + PyMuPDF + OCR` 逐页混合链路，回退原因写入 `parse_meta.fallback_reason` |
+| `mineru` | 强制 MinerU，不可用直接 503（fail-loud，不接受「看起来解析成功、实际是空文本」的假阴性） |
+| `legacy` | 完全关闭 MinerU，走内置链路（含跨页表格合并 / 多栏栏感知） |
+
+**两个后端（`MINERU_BACKEND`）**
+
+- `cli`（`auto` 优先）：4.x `mineru-kit parse <pdf> -o result.md --tier standard`，2.x/3.x `mineru -p <pdf> -o <dir> -m auto`；收集 `*.md`、`*_content_list.json` 与 `images/`。
+- `http`：调用内网自建服务 `POST /v1/file_parse`（`backend/scripts/mineru_http_server.py`，纯标准库实现，默认只监听 `127.0.0.1`，可选 Bearer Token），返回 `{markdown, content_list, images(base64)}`。适合把模型权重放在独立 CPU/GPU 节点、多台 backend 共享。
+
+**结构化结果归一化**：`mineru_parser.py` 把 content_list 的 `text / title / table / image / equation` 统一成 `MinerUBlock`（表格 HTML → `单元格 | 单元格` 纯文本），并在临时目录清理前把图片字节读进内存；只有 Markdown 时按空行与图片引用切粗粒度块。兼容 MinerU 2.x/3.x `content_list.json` 与 4.x Content List V1/V2 的字段差异，CLI 与 HTTP 两后端共用同一套归一化逻辑。
+
+**多模态视觉补识（`MINERU_VISION_ENRICH`）**：MinerU 负责「切出图片块」，多模态视觉大模型（默认 `qwen-vl-max-latest`）负责「读懂图片里是什么」——公章、签名、手写批注、表格截图、证照。识别文本以 `【图片内容·多模态识别】` 回填到 Markdown 原位置；未识别的临时图片路径被清成 `【图片区块】`，避免下游 LLM 看到失效引用。单份文档最多补识 `MINERU_VISION_MAX_IMAGES`（默认 6）张以控成本与时延；视觉模型失败只记 warning，不影响版面解析主文本。整页拍照件 / 扫描 PDF 仍走原有 `IMAGE_OCR_STRATEGY`（`auto` → 视觉 LLM → Tesseract）。
+
+**隐私边界**：MinerU 是可选能力，默认本机 CLI 或内网 HTTP，合同原件不会上传任何公网解析服务；只有图片块会（按配置）送到视觉模型 API，与「推理私有化」口径一致（可切本地 vLLM / Ollama 视觉模型）。
+
+**可观测**：`POST /api/v1/ingest/file` 响应新增 `parse_meta`：`{parser, detail, blocks, images, vision_enriched, fallback_reason}`，前端与后端复用同一份事实，不会出现「日志说降级、界面说成功」的口径分裂。
+
+**降级矩阵**
+
+| 场景 | `auto` | `mineru` | `legacy` |
+|---|---|---|---|
+| CLI / HTTP 都不可用 | 回退内置链路 + 记录原因 | 503 | 内置链路 |
+| CLI 超时 / 非零退出 / 输出为空 | 回退内置链路 + 记录原因 | 503 | 内置链路 |
+| 视觉模型未配置 / 调用失败 | 版面文本保留，图片块标占位 | 同左 | 不涉及 |
+| MinerU 正常 | Markdown + 结构化块 + 视觉补识 | 同左 | 内置链路 |
 
 ---
 
@@ -396,6 +437,37 @@ npm run dev
 
 ---
 
+### 7.3 方式三（可选）：启用 MinerU 版面解析
+
+MinerU 是**可选能力**：不安装时 PDF 走内置 `pypdf + PyMuPDF + OCR` 链路，服务照常启动；装上后 `PDF_PARSER_STRATEGY=auto`（默认）会自动启用。
+
+```bash
+# 1) 在独立 venv 安装 MinerU 4.x (Python 3.11~3.14, 模型权重首次按需下载)
+uv venv .mineru --python 3.12
+uv pip install -U "mineru>=4.0,<5"
+mineru-kit parse contract.pdf -o contract.md --tier standard   # 先单独验证 CLI 可用
+
+# 2) 本机 CLI 模式 (默认): 让 backend 能找到可执行文件
+#    MINERU_BACKEND=cli
+#    MINERU_CLI=/abs/path/to/mineru-kit   # 留空则自动探测 PATH 中的 mineru-kit / mineru
+#    MINERU_CLI_FLAVOR=auto               # 2.x/3.x 用户显式设 v2
+
+# 3) 内网 HTTP 模式: 在装了 MinerU 的机器上启动零依赖适配服务 (默认只监听 127.0.0.1)
+python backend/scripts/mineru_http_server.py --cli mineru-kit --port 8100 --token mytoken
+#    MINERU_BACKEND=http
+#    MINERU_HTTP_URL=http://127.0.0.1:8100/v1/file_parse
+#    MINERU_HTTP_TOKEN=mytoken
+
+# 4) 图片块交给多模态视觉模型补识 (默认开)
+#    MINERU_VISION_ENRICH=true
+#    MINERU_VISION_MAX_IMAGES=6
+#    LLM_VISION_API_KEY=...               # 未配置则图片块只保留占位, 不影响版面文本
+```
+
+> 需要「必须走 MinerU」的验收环境设 `PDF_PARSER_STRATEGY=mineru`：解析不可用会返回 503，而不是静默降级成质量更差的结果。完整配置项见 §九。
+
+---
+
 ## 八、测试、评测与量化口径
 
 ### 8.1 自动化测试与覆盖率
@@ -408,7 +480,8 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **100+ 条 pytest 用例**（其中 2 条 e2e 需 `LUMOS_E2E=1`），覆盖：API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、表格跨栏合并、多栏栏感知抽取、Embedding/Chroma 降级兜底（见 `backend/tests/`）；
+- 当前 **100+ 条 pytest 用例**（其中 14 条为 MinerU 版面解析 / 视觉补识 / 回退分支，2 条 e2e 需 `LUMOS_E2E=1`），覆盖：**MinerU CLI/HTTP 两后端、content_list 归一化、图片块视觉补识、auto 回退与 fail-loud**（见 `backend/tests/test_mineru_parser.py`）、API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、表格跨栏合并、多栏栏感知抽取、Embedding/Chroma 降级兜底（见 `backend/tests/`）；
+- **MinerU 相关 14 条用例全部可离线运行**：以打桩的 `subprocess.run`、假 httpx 模块、假 pypdf 注入，不依赖真实 MinerU 模型权重、网络或视觉 API Key；`tests/conftest.py` 把 PDF 策略默认固定为 `legacy`，保证既有 OCR / 版面用例不受「开发机是否装有 MinerU」影响。
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
 ### 8.2 离线检索效果评测（hit@k / MRR）
@@ -472,6 +545,11 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | | `RETRIEVAL_MIN_SIMILARITY` | `0.05` | 精排后 `final_score` 低于该阈值的命中被过滤 |
 | 视觉 OCR | `LLM_VISION_API_KEY` / `LLM_VISION_BASE_URL` / `LLM_VISION_MODEL_NAME` | qwen-vl / DashScope | 图片文字抽取（未配置时回退 Tesseract） |
 | | `IMAGE_OCR_STRATEGY` | `auto` | `auto` \| `llm` \| `tesseract` |
+| MinerU 版面解析 | `PDF_PARSER_STRATEGY` | `auto` | `auto`（不可用回退并记录原因） \| `mineru`（强制，不可用 503） \| `legacy`（关闭） |
+| | `MINERU_BACKEND` / `MINERU_CLI` / `MINERU_CLI_FLAVOR` | `auto` / 空 / `auto` | 后端 `cli` \| `http` \| `auto`（CLI 优先）；CLI 路径与版本风味 `v4` / `v2` |
+| | `MINERU_TIER` / `MINERU_METHOD` / `MINERU_TIMEOUT_SECONDS` | `standard` / `auto` / `180` | 4.x 解析档位（flash/basic/standard/advanced）/ 2.x 方法 / 超时秒数 |
+| | `MINERU_HTTP_URL` / `MINERU_HTTP_TOKEN` | （空） | 内网解析服务地址与可选 Bearer Token；留空则不启用 HTTP 后端 |
+| | `MINERU_VISION_ENRICH` / `MINERU_VISION_MAX_IMAGES` | `true` / `6` | 版面图片块交多模态视觉模型补识 / 单份文档补识上限 |
 | 安全 | `API_SECRET_KEY` | （空，置空关闭鉴权） | 业务鉴权密钥 |
 | | `JWT_SECRET_KEY` | `change-me-in-production` | JWT 签名密钥 |
 | | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | `10080` | Token 过期时间（7 天） |
@@ -503,7 +581,7 @@ python -m eval.retrieval_eval --topk 5   # 输出 backend/eval/output/retrieval_
 | A2A 协议 | `GET` | `/.well-known/agent.json` | Agent Card（能力自描述） |
 | | `POST` | `/a2a` | A2A JSON-RPC 同步端点（message/send） |
 | | `POST` | `/a2a/stream` | A2A SSE 流式端点（message/stream） |
-| 智能导入 | `POST` | `/api/v1/ingest/file` | 上传文件抽取文本（16 种格式 + OCR） |
+| 智能导入 | `POST` | `/api/v1/ingest/file` | 上传文件抽取文本（16 种格式 + OCR；PDF 可选 MinerU 版面解析 + 视觉模型补识），响应含 `parse_meta` 解析链路元信息 |
 | | `POST` | `/api/v1/ingest/url` | 抓取网页抽取正文 |
 | 智能咨询 | `POST` | `/api/v1/consult/ask` | 发起智能咨询（SSE 流式） |
 | | `GET` | `/api/v1/consult/sessions` | 会话列表 |
@@ -560,8 +638,12 @@ lumos/
 │   │   ├── a2a/                       # A2A 协议（Agent Card / JSON-RPC / SSE）
 │   │   ├── models/                    # 数据模型（SQLModel）
 │   │   ├── schemas/                   # Pydantic 出入参 / SSE 事件协议
-│   │   ├── services/                  # 文本摄取（16 种格式 + OCR）
+│   │   ├── services/                  # 文本摄取（16 种格式 + OCR + MinerU 版面解析）
+│   │   │   ├── mineru_parser.py       # MinerU CLI/HTTP 适配、content_list 归一化、视觉补识
+│   │   │   └── text_extractor.py      # 统一抽取入口 + PDF 策略分流 + 内置 OCR 回退
 │   │   └── skills/                    # 可复用技能
+│   ├── scripts/
+│   │   └── mineru_http_server.py      # 内网 MinerU 解析服务（标准库，零第三方依赖）
 │   ├── eval/                          # 离线检索评测（hit@k / MRR，金标准语料）
 │   │   └── retrieval_eval.py
 │   ├── tests/                         # 100+ 条 pytest 用例（2 条 e2e marker）

@@ -10,6 +10,10 @@ from __future__ import annotations
 import base64
 import io
 from html.parser import HTMLParser
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.mineru_parser import ParseMeta
 
 MAX_CHARS = 100_000
 
@@ -21,9 +25,79 @@ class ServiceNotReadyError(RuntimeError):
 # ─── PDF ───────────────────────────────────────────────────────
 
 
+def extract_pdf_detailed(data: bytes) -> tuple[str, bool, ParseMeta]:
+    """带解析链路元信息的 PDF 抽取入口 (供 /ingest/file 下发 parser).
+
+    策略由 settings.pdf_parser_strategy 控制:
+      - auto   : 有 MinerU 就走版面解析, 不可用自动回退内置链路并记录原因 (默认)
+      - mineru : 强制 MinerU, 不可用/失败抛 503 (fail-loud, 不假装解析成功)
+      - legacy : 完全走内置 pypdf + PyMuPDF + OCR 逐页混合抽取
+    """
+    from app.core.config import get_settings
+    from app.services.mineru_parser import (
+        MinerUUnavailable,
+        enrich_with_vision,
+        fallback_meta,
+        parse_pdf,
+        result_to_meta,
+    )
+
+    settings = get_settings()
+    strategy = str(getattr(settings, "pdf_parser_strategy", "legacy") or "legacy").lower()
+    meta = None
+    if strategy in ("auto", "mineru"):
+        try:
+            result = parse_pdf(data, settings)
+            try:
+                enrich_with_vision(result, settings)
+            except Exception as e:  # 视觉增强是附加能力, 失败不影响版面解析主文本
+                result.warnings.append(f"vision_enrich: {type(e).__name__}: {e}")
+            meta = result_to_meta(result)
+            return result.text, not _pdf_has_text_layer(data), meta
+        except MinerUUnavailable as e:
+            if strategy == "mineru":
+                raise ServiceNotReadyError(f"MinerU 解析不可用: {e}") from e
+            meta = fallback_meta(str(e))
+        except Exception as e:  # 未知异常也不静默吞掉
+            if strategy == "mineru":
+                raise ServiceNotReadyError(f"MinerU 解析异常: {e}") from e
+            meta = fallback_meta(f"{type(e).__name__}: {e}")
+    else:
+        meta = fallback_meta()
+
+    text, scanned = _extract_pdf_legacy(data)
+    return text, scanned, meta or fallback_meta()
+
+
 def extract_pdf(data: bytes) -> tuple[str, bool]:
+    """兼容旧调用方: 返回 (text, is_scanned)."""
+    text, scanned, _ = extract_pdf_detailed(data)
+    return text, scanned
+
+
+def _pdf_has_text_layer(data: bytes) -> bool:
+    """MinerU 路径下判定扫描件: pypdf 探测任意页有无文字层 (不触发 OCR)."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return True  # 探测失败不武断判定为扫描件
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        return any((page.extract_text() or "").strip() for page in reader.pages)
+    except Exception:
+        return True
+
+
+def _extract_pdf_legacy(data: bytes) -> tuple[str, bool]:
     """
     抽取 PDF 文本 (逐页混合): 有文字层的页直取文字, 空白页自动渲染为图片并 OCR.
+
+    跨页表格后处理: 逐页抽取完成后, 若开启 ``pdf_cross_page_table_merge``
+    (默认开), 会把被页边界切开的表格按"表头重复 / 列数一致 / 末行截断 /
+    版面 y 坐标连续 / 表题连续"重新拼回一张 (详见 ``table_merge.py``)。
+    其中版面几何由 ``pdf_layout_geometry`` 控制: 有文字层的页用 PyMuPDF
+    矢量线框, 扫描页复用已渲染位图跑 Tesseract 词框 (详见 ``table_layout.py``);
+    拿不到几何时自动退回纯文本信号, 不会让功能退化。
 
     Returns:
         (text, is_scanned): is_scanned=True 表示整份 PDF 无任何文字层 (全扫描件);
@@ -34,6 +108,9 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
     except ImportError as e:
         raise ServiceNotReadyError("PDF 抽取组件未就绪, 请稍后重试") from e
 
+    from app.core.config import get_settings
+
+    settings = get_settings()
     reader = PdfReader(io.BytesIO(data))
     page_texts: list[str] = []
     for page in reader.pages:
@@ -43,23 +120,53 @@ def extract_pdf(data: bytes) -> tuple[str, bool]:
             text = ""
         page_texts.append(text)
 
+    # 同页多栏(双栏/分栏)栏感知抽取: 对有文字层的多栏页按"先栏后 y"重组,
+    # 避免跨栏文本把同栏内的表格行切断; 单栏/无 PyMuPDF 时不改动
+    if getattr(settings, "pdf_column_aware_extract", False):
+        page_texts = _apply_column_aware_extract(data, page_texts)
+
     # 无文字层 (需 OCR) 的页索引
     blank_idx = [i for i, t in enumerate(page_texts) if not t.strip()]
+    pixmaps: dict[int, bytes] = {}
     if not blank_idx:
-        return "\n".join(page_texts), False
+        segments = [t.strip() for t in page_texts]
+    else:
+        # 逐页混合: 仅对空白页渲染位图走 OCR, 有文字层的页保留原文
+        # 开启版面几何时顺带保留"含表格"的页位图, 供 Tesseract 词框复用 (不重复渲染)
+        ocr_map, pixmaps = _ocr_pdf_pages(
+            data, blank_idx, capture_pixmaps=settings.pdf_layout_geometry
+        )
+        segments = [
+            t.strip() if t.strip() else ocr_map.get(i, "")
+            for i, t in enumerate(page_texts)
+        ]
 
-    # 逐页混合: 仅对空白页渲染位图走 OCR, 有文字层的页保留原文
-    ocr_map = _ocr_pdf_pages(data, blank_idx)
-    merged = [
-        t.strip() if t.strip() else ocr_map.get(i, "")
-        for i, t in enumerate(page_texts)
-    ]
+    # 跨页表格合并 (无表格或页数<2 时为无副作用的恒等变换)
+    if settings.pdf_cross_page_table_merge:
+        from app.services.table_merge import merge_cross_page_tables
+
+        layouts: dict[int, list] = {}
+        if settings.pdf_layout_geometry:
+            from app.services.table_layout import extract_pdf_layout
+
+            layouts = extract_pdf_layout(data, blank_idx, ocr_renderer=pixmaps.get)
+
+        segments = merge_cross_page_tables(segments, layouts=layouts or None)
+
     is_scanned = len(blank_idx) == len(page_texts)  # 全部页都无文字层 → 整份扫描件
-    return "\n\n".join(seg for seg in merged if seg), is_scanned
+    return "\n\n".join(seg for seg in segments if seg), is_scanned
 
 
-def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict[int, str]:
-    """将指定页索引渲染为 PNG 并 OCR, 返回 {页索引: 识别文本}.
+def _ocr_pdf_pages(
+    data: bytes,
+    page_indices: list[int],
+    dpi: int = 200,
+    capture_pixmaps: bool = False,
+) -> tuple[dict[int, str], dict[int, bytes]]:
+    """将指定页索引渲染为 PNG 并 OCR, 返回 ({页索引: 文本}, {页索引: 位图}).
+
+    ``capture_pixmaps=True`` 时保留位图供版面几何复用 (避免重复渲染); 为控制
+    内存, 只保留"OCR 文本里确实含表格行"的页, 纯正文页直接丢弃。
 
     依赖 PyMuPDF (fitz) 渲染页面; 渲染/OCR 不可用时抛 ServiceNotReadyError 转 503。
     """
@@ -76,6 +183,7 @@ def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict
         raise ServiceNotReadyError(f"扫描版 PDF 解析失败: {e}") from e
 
     ocr_map: dict[int, str] = {}
+    pixmap_map: dict[int, bytes] = {}
     try:
         zoom = dpi / 72  # PDF 基准 72dpi, 提高采样率以改善小字识别
         matrix = fitz.Matrix(zoom, zoom)
@@ -83,14 +191,73 @@ def _ocr_pdf_pages(data: bytes, page_indices: list[int], dpi: int = 200) -> dict
         for idx in page_indices:
             if idx >= total:
                 continue
-            pixmap = doc[idx].get_pixmap(matrix=matrix)
-            ocr_text, _ = extract_image(pixmap.tobytes("png"))
+            png = doc[idx].get_pixmap(matrix=matrix).tobytes("png")
+            ocr_text, _ = extract_image(png)
             if ocr_text.strip():
                 ocr_map[idx] = ocr_text.strip()
+            if capture_pixmaps and _looks_like_table_page(ocr_text):
+                pixmap_map[idx] = png
     finally:
         doc.close()
 
-    return ocr_map
+    return ocr_map, pixmap_map
+
+
+def _looks_like_table_page(text: str) -> bool:
+    """该页 OCR 文本里是否含表格行 (≥2 列), 用于决定要不要保留位图做几何提取."""
+    if not text:
+        return False
+    from app.services.table_merge import split_row
+
+    return any(split_row(line) for line in text.split("\n"))
+
+
+def _extract_page_column_aware(page) -> str | None:
+    """用 PyMuPDF blocks 对单页做栏感知抽取; 单栏/异常返回 None (调用方回退)."""
+    try:
+        blocks = page.get_text("blocks")
+    except Exception:
+        return None
+    text_blocks = [
+        b for b in blocks
+        if len(b) >= 7 and b[6] == 0 and (b[4] or "").strip()
+    ]
+    if not text_blocks:
+        return None
+    rect = getattr(page, "rect", None)
+    page_width = float(getattr(rect, "width", 0) or 0)
+    if page_width <= 0:
+        return None
+    from app.services.table_layout import (
+        detect_columns_from_blocks,
+        reorder_blocks_by_columns,
+    )
+
+    columns = detect_columns_from_blocks(text_blocks, page_width)
+    if len(columns) <= 1:
+        return None  # 单栏: 回退原抽取, 避免两种引擎的文本差异
+    return "\n".join(reorder_blocks_by_columns(text_blocks, columns))
+
+
+def _apply_column_aware_extract(data: bytes, page_texts: list[str]) -> list[str]:
+    """对有文字层的多栏页用栏感知结果覆盖, 其余页保持不变."""
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return page_texts
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+    except Exception:
+        return page_texts
+    try:
+        for idx in range(min(doc.page_count, len(page_texts))):
+            if page_texts[idx].strip():
+                col = _extract_page_column_aware(doc[idx])
+                if col is not None:
+                    page_texts[idx] = col
+    finally:
+        doc.close()
+    return page_texts
 
 
 # ─── DOCX ──────────────────────────────────────────────────────
@@ -439,12 +606,15 @@ def _extract_image_tesseract(data: bytes) -> tuple[str, bool]:
     return text, True
 
 
-def extract_image_via_llm(data: bytes) -> tuple[str, bool]:
+def extract_image_via_llm(data: bytes, prompt: str | None = None) -> tuple[str, bool]:
     """
     多模态 LLM 图片文字抽取 (高准确率, 支持中文/表格/手写).
 
     复用 OpenAI 兼容视觉接口 (默认通义千问 VL); 未配置视觉密钥时抛
     ServiceNotReadyError 以便上层回退到 Tesseract。
+
+    ``prompt`` 可覆盖默认提示词: MinerU 版面切出的印章/签名/手写批注等
+    图片块会传入专用提示词, 与整页 OCR 区分开。
     """
     try:
         from langchain_openai import ChatOpenAI  # noqa: F401  (确保依赖可用)
@@ -468,7 +638,7 @@ def extract_image_via_llm(data: bytes) -> tuple[str, bool]:
             [
                 {
                     "type": "text",
-                    "text": (
+                    "text": prompt or (
                         "请完整提取图片中的全部文字内容, 保留原有段落、标题与表格排版, "
                         "只输出文字本身, 不要任何解释或前缀。"
                     ),
@@ -536,12 +706,27 @@ _EXTRACTORS: dict[str, object] = {
 }
 
 
-def extract_by_ext(ext: str, data: bytes) -> tuple[str, bool]:
-    """按扩展名分发抽取, 返回 (text, is_scanned)."""
+def extract_by_ext_detailed(ext: str, data: bytes) -> tuple[str, bool, ParseMeta]:
+    """按扩展名分发抽取, 额外返回解析链路元信息 (供 /ingest/file 下发).
+
+    PDF 走 extract_pdf_detailed (MinerU / 内置链路二选一并记录回退原因),
+    其余格式返回默认 ParseMeta。
+    """
+    from app.services.mineru_parser import ParseMeta
+
+    if ext == "pdf":
+        return extract_pdf_detailed(data)
     extractor = _EXTRACTORS.get(ext)
     if extractor is None:
         raise ServiceNotReadyError(f"不支持的文件类型: {ext}")
-    return extractor(data)  # type: ignore[operator]
+    text, scanned = extractor(data)  # type: ignore[operator]
+    return text, scanned, ParseMeta()
+
+
+def extract_by_ext(ext: str, data: bytes) -> tuple[str, bool]:
+    """按扩展名分发抽取, 返回 (text, is_scanned)."""
+    text, scanned, _ = extract_by_ext_detailed(ext, data)
+    return text, scanned
 
 
 def truncate(text: str, max_chars: int = MAX_CHARS) -> tuple[str, bool]:

@@ -23,7 +23,7 @@ from app.services.contract_guard import check_document
 from app.services.file_signature import verify_file_content
 from app.services.text_extractor import (
     ServiceNotReadyError,
-    extract_by_ext,
+    extract_by_ext_detailed,
     html_to_text,
     truncate,
 )
@@ -115,7 +115,7 @@ async def ingest_file(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     try:
-        text, scanned = extract_by_ext(ext, data)
+        text, scanned, parse_meta = extract_by_ext_detailed(ext, data)
     except ServiceNotReadyError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -135,6 +135,8 @@ async def ingest_file(
         "scanned": scanned,
         "object_name": object_name,
         "doc_check": doc_check.to_dict(),
+        # 解析链路可观测: 本次由 MinerU 版面解析还是内置 OCR 抽取、是否回退
+        "parse_meta": parse_meta.to_dict(),
     }
 
 

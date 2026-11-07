@@ -93,3 +93,15 @@ async def client(async_session: AsyncSession) -> AsyncGenerator[AsyncClient, Non
         headers=headers,
     ) as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _legacy_pdf_parser_by_default(monkeypatch) -> None:
+    """PDF 单测默认走内置链路, 避免「开发机是否装有 MinerU CLI」影响既有断言.
+
+    MinerU 相关用例会在测试内显式覆盖 get_settings / pdf_parser_strategy。
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "pdf_parser_strategy", "legacy", raising=False)

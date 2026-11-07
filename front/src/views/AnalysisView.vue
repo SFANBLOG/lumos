@@ -79,6 +79,15 @@
                     <span class="qz-chip qz-chip--primary">{{ fileMeta.ext.toUpperCase() }}</span>
                     <span>已抽取 {{ fileMeta.char_count.toLocaleString() }} 字</span>
                     <span v-if="fileMeta.scanned" class="qz-chip qz-chip--warn">疑似扫描件</span>
+                    <span
+                      v-if="fileMeta.parse_meta"
+                      class="qz-chip qz-chip--info"
+                      :title="fileMeta.parse_meta.fallback_reason || fileMeta.parse_meta.detail"
+                    >
+                      {{ fileMeta.parse_meta.parser === 'mineru' ? 'MinerU 版面解析' : '内置 OCR 链路' }}
+                      <template v-if="fileMeta.parse_meta.vision_enriched"> · 视觉补识 {{ fileMeta.parse_meta.vision_enriched }}</template>
+                      <template v-if="fileMeta.parse_meta.fallback_reason"> · 已回退</template>
+                    </span>
                   </div>
                   <el-alert
                     v-if="fileMeta.truncated"

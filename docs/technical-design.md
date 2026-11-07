@@ -231,3 +231,29 @@ backend/
 | `WinError 10060` 请求 `huggingface.co/.../modules.json` | 本地权重未被识别，sentence-transformers 走 HF 探测 | 确认本地权重目录存在且命名符合 B.3；必要时设 `HF_ENDPOINT=https://hf-mirror.com` |
 | `PyMilvusDeprecationWarning: Collection.xxx will be removed` | 仍在使用 ORM-style API | 使用 `MilvusClient` 客户端 API（见 B.1） |
 | 前端请求后端 404 | 8000 端口被其他服务（如 Milvus Attu）占用，或 Vite 代理未指到后端实际端口 | 确认后端实际端口（默认 `8001`）；确认 `vite.config.ts` 中 `/api → localhost:8001`；排查时加 `--noproxy '*'` |
+
+---
+
+## 附录 C · MinerU 版面解析与多模态视觉补识（2026-11）
+
+### C.1 接入位置与不变量
+
+- 新增 `services/mineru_parser.py`（纯标准库 + 可选 `httpx`），只在 `text_extractor.extract_pdf_detailed` 内懒加载；未安装 MinerU 不影响 `import app` 与服务启动。
+- `extract_pdf` 保持原签名 `(text, is_scanned)`；新增 `extract_pdf_detailed` 返回 `(text, is_scanned, ParseMeta)`，旧调用方零改动；`extract_by_ext_detailed` 同理。
+- `ParseMeta` 随 `/ingest/file` 响应下发：`{parser, detail, blocks, images, vision_enriched, fallback_reason}`，前后端对「谁解析的 / 有没有降级」共享同一份事实。
+
+### C.2 状态机（`PDF_PARSER_STRATEGY` × `MINERU_BACKEND`）
+
+| 策略 | 行为 |
+|---|---|
+| `legacy` | 直接 `_extract_pdf_legacy`：pypdf 逐页取文字层 + PyMuPDF 200dpi 渲染无文字层页 + OCR（视觉 LLM → Tesseract）+ 跨页表格合并 / 多栏栏感知 |
+| `auto`（默认） | 先 `_resolve_cli` 探测 PATH 中的 `mineru-kit` / `mineru`，再尝试 `MINERU_HTTP_URL`；命中则解析，任何 `MinerUUnavailable`（超时 / 非零退出 / 空输出 / HTTP 错误）回退 legacy 并写 `fallback_reason` |
+| `mineru` | 上述失败抛 `ServiceNotReadyError` → 503，禁止「空文本假成功」（与 `ai_degraded` fail-loud 同一语义） |
+
+### C.3 数据流与生命周期
+
+临时目录写入 `input.pdf` → CLI 产出 `result.md` + `*_content_list.json` + `images/` → content_list 归一化为 `MinerUBlock`（表格 HTML → `单元格 | 单元格` 纯文本，兼容 2.x/3.x 与 4.x Content List）→ 图片字节在 `TemporaryDirectory` 清理前 `read_bytes()` 读入内存 → 可选交多模态视觉 LLM 补识并替换 `![](...)` 引用 → 文本进入既有 `ExtractorAgent / RAG / Reviewer`。HTTP 后端返回 `{markdown, content_list, images(base64)}`，走同一套归一化与补识逻辑。
+
+### C.4 部署与边界
+
+MinerU 是 `pyproject.toml` 的可选 `mineru` extra，推荐装在独立 venv / 容器；backend 通过本机 CLI 或 `scripts/mineru_http_server.py`（标准库 `http.server`，默认只听 `127.0.0.1`，可选 Bearer Token，校验 `%PDF` magic bytes）调用。模型权重首次按需下载，私有化交付需预置；`MINERU_TIMEOUT_SECONDS=180`、`MINERU_VISION_MAX_IMAGES=6` 控制时延与成本。**无端到端准确率评测**，只有 14 条离线链路用例（打桩 `subprocess.run` / 假 httpx / 假 pypdf）。

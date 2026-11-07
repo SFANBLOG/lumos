@@ -94,6 +94,31 @@ class Settings(BaseSettings):
     llm_vision_model_name: str = "qwen-vl-max-latest"
     image_ocr_strategy: str = "auto"  # auto | llm | tesseract
 
+    # ── MinerU 版面解析 (PDF → Markdown + 结构化块) ───────────
+    # auto: 有 MinerU CLI/服务就用, 不可用自动回退内置 pypdf/PyMuPDF/OCR 链路;
+    # mineru: 强制使用 (不可用即 503, 避免"看起来成功实则空文本"的假阴性);
+    # legacy: 完全关闭 MinerU。MinerU 是可选依赖, 不装不影响服务启动。
+    pdf_parser_strategy: str = "auto"  # auto | mineru | legacy
+    mineru_backend: str = "auto"  # auto | cli | http (auto 优先本机 CLI, 合同不出内网)
+    mineru_cli: str = ""  # MinerU 可执行文件; 空=自动探测 mineru-kit / mineru
+    mineru_cli_flavor: str = "auto"  # auto | v4 (mineru-kit parse) | v2 (mineru -p)
+    mineru_tier: str = "standard"  # 4.x 档位: flash | basic | standard | advanced
+    mineru_method: str = "auto"  # 2.x/3.x 解析方法: auto | txt | ocr
+    mineru_http_url: str = ""  # 内网解析服务, 例 http://127.0.0.1:8100/v1/file_parse
+    mineru_http_token: str = ""  # 可选 Bearer Token
+    mineru_timeout_seconds: int = 180
+    # 版面图片块 (公章/签名/手写批注) 交给多模态视觉大模型补识, 识别文本回填原位
+    mineru_vision_enrich: bool = True
+    mineru_vision_max_images: int = 6  # 单份文档最多补识的图片数 (控制成本与时延)
+
+    # 内置 PDF 链路的版面解析开关 (MinerU 不可用时的回退链路, 与 lumos 工作副本保持一致)
+    # 扫描版/文字层 PDF 的跨页表格自动检测与合并 (见 app/services/table_merge.py)
+    pdf_cross_page_table_merge: bool = True
+    # 跨页判定的「版面 y 坐标连续性」信号 (见 app/services/table_layout.py)
+    pdf_layout_geometry: bool = True
+    # 同页多栏 (双栏/分栏) 的栏感知抽取: 检测栏边界后按「先栏后 y」重组文本块
+    pdf_column_aware_extract: bool = True
+
     # ── 安全 ──────────────────────────────────────────────────
     api_secret_key: str = ""
     jwt_secret_key: str = "change-me-in-production"

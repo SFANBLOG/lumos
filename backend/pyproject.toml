@@ -69,6 +69,12 @@ dev = [
     "pre-commit>=4.0.0",
 ]
 
+# MinerU 是可选依赖: 推荐装在独立 venv / 独立容器，后端只通过 CLI 或内网 HTTP 调用。
+# 不装完全不影响服务启动 (PDF_PARSER_STRATEGY=auto 会自动回退内置 pypdf/PyMuPDF/OCR)。
+mineru = [
+    "mineru>=4.0,<5",  # 提供 mineru-kit / mineru CLI (Python 3.11~3.14)
+]
+
 # 本地真实 embedding 模型已并入主依赖 (provider=local 默认启用, 首次缺失自动下载)。
 # 如需改用 OpenAI 兼容 embedding 接口, 设 EMBEDDING_PROVIDER=api 即可, 无需额外依赖。
 

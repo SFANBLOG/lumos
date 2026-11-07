@@ -9,6 +9,18 @@
 
 ## [Unreleased]
 
+### 🧩 MinerU 版面解析 + 多模态视觉模型接入（可选、可降级）
+
+- ➕ 新增 `backend/app/services/mineru_parser.py`：MinerU 版面解析适配层，支持本机 CLI（4.x `mineru-kit parse` / 2.x `mineru -p`）与内网 HTTP 服务两种后端；统一收集 `*.md`、`*_content_list.json` 与 `images/`，把 `text/title/table/image/equation` 归一化为 `MinerUBlock`（表格 HTML → `单元格 | 单元格` 纯文本）
+- 🤖 **多模态视觉模型联动**：MinerU 切出的公章/签名/手写批注/表格截图等图片块交给视觉大模型（默认 `qwen-vl-max-latest`）补识，识别文本以 `【图片内容·多模态识别】` 回填 Markdown 原位置；未识别的临时图片路径清成占位，避免下游 LLM 看到失效引用；`extract_image_via_llm` 新增可选 `prompt` 参数区分整页 OCR 与图片块识别
+- 🔌 `text_extractor.extract_pdf` 拆为 `extract_pdf_detailed`（带解析元信息）与 `_extract_pdf_legacy`（原内置 pypdf + PyMuPDF + OCR 逐页混合链路）；新增 `extract_by_ext_detailed`，`POST /api/v1/ingest/file` 响应新增 `parse_meta`（parser / detail / blocks / images / vision_enriched / fallback_reason）；前端 `AnalysisView` 同步展示解析引擎 / 视觉补识数 / 回退提示，`ParseMeta` 类型见 `front/src/api/ingest.ts`
+- 🛡️ **三策略与 fail-loud**：`PDF_PARSER_STRATEGY=auto`（默认，不可用自动回退并记录原因）/ `mineru`（强制，不可用返回 503，不接受空文本假阴性）/ `legacy`（关闭）；CLI 超时、非零退出、输出为空均显式降级，不会出现「看起来成功实则没解析」
+- 🌐 新增 `backend/scripts/mineru_http_server.py`：纯标准库实现的内网解析服务（`POST /v1/file_parse`），默认只监听 `127.0.0.1`，支持可选 Bearer Token 与 PDF magic bytes 校验；便于把模型权重部署在独立 CPU/GPU 节点
+- ⚙️ 新增 11 个配置项（`PDF_PARSER_STRATEGY` / `MINERU_BACKEND` / `MINERU_CLI` / `MINERU_CLI_FLAVOR` / `MINERU_TIER` / `MINERU_METHOD` / `MINERU_HTTP_URL` / `MINERU_HTTP_TOKEN` / `MINERU_TIMEOUT_SECONDS` / `MINERU_VISION_ENRICH` / `MINERU_VISION_MAX_IMAGES`），根 `.env.example` 与 `backend/.env.example` 同步；`pyproject.toml` 新增可选 `mineru` extra，不装不影响服务启动
+- 🧪 新增 14 条离线用例（`tests/test_mineru_parser.py`）：CLI 两版本命令形态、产物收集、失败/超时、content_list 归一化、视觉补识成功与失败、HTTP JSON 解析、auto 回退 / mineru fail-loud / 正常解析三分支；`tests/conftest.py` 固定单测默认 `legacy`，避免开发机环境差异影响既有 PDF 断言
+- 🔧 顺带补齐内置 PDF 回退链路：`PDF_CROSS_PAGE_TABLE_MERGE` / `PDF_LAYOUT_GEOMETRY` / `PDF_COLUMN_AWARE_EXTRACT` 三个配置开关与跨页表格合并、多栏栏感知抽取接线（此前 `table_layout.py` / `table_merge.py` 与测试已存在但未接入 `extract_pdf`，导致 3 条既有测试失败），使两份工作副本的 PDF 链路保持一致
+- 📝 README 新增 §5.2「MinerU 版面解析 + 多模态视觉模型」与 §7.3 可选安装说明，补齐技术栈、环境变量、API、项目结构与测试口径
+
 ### 🔍 混合检索相关度分数优化
 
 - 🐛 **修复 Milvus COSINE 分数语义反转**：COSINE 度量的 `distance` 字段即余弦相似度（越大越相似），旧代码 `1 - distance` 导致得分与相关度背离；现直接裁剪至 [0, 1] 输出
