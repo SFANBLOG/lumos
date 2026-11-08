@@ -1,22 +1,32 @@
 """
-LangGraph 合同审查工作流.
+多智能体协作式合同审查工作流 (LangGraph).
 
-以 LangGraph ``StateGraph`` 编排 4 个阶段节点:
+默认 ``AGENT_MODE=multi``: 多个自治智能体通过共享消息总线协作,
+由 Coordinator 动态编排, Verifier 独立复核并可否决结论、发起返工::
 
-    extractor → retriever → reviewer → negotiator
+    START → coordinator → extractor → retriever → reviewer → verifier
+                                          ↑                    │
+                                          └──── rework ────────┘
+                                                             ↓
+                                                       negotiator → END
 
-其中证据质检 (quality_gate) 内联在 reviewer 节点内执行, 合同义务提取
-(obligation) 内联在 negotiator 节点内执行; 节点间共享 pydantic
-``AgentState``; 每个节点包装一个子智能体执行, 节点内产生的事件
-(THINKING / NODE_COMPLETE / RISK_FOUND) 按序累积进 ``state.events``,
-由 ``run_contract_analysis`` 沿 SSE 协议回放; NODE_START 事件由
-runner 按线性图顺序预推, 保持原有 SSE 时间线语义。
+- Coordinator 依合同规模决定参与智能体 (agent_plan), 并逐个下发 task 消息;
+- 每个智能体执行完广播 result 消息, 审查轨迹全部落在 agent_messages;
+- reviewer 之后由条件边按 agent_plan 决定是否进入独立复核;
+- Verifier 交叉核验原文定位与法条溯源, 不通过则给 Reviewer 发 rework 消息,
+  条件边把流程退回 Reviewer 重审 (受 max_review_rounds 限制, 默认 1 轮);
+- 通过 (或达上限) 则给 Negotiator 发 handoff 消息放行。
 
-对外保持 ``run_contract_analysis`` 接口不变 (供 SSE 流式调用)。
+``AGENT_MODE=linear`` 保留原四节点线性流水线作为回退 (回归对比 / 降级用)。
+
+对外保持 ``run_contract_analysis`` 接口、SSE 事件协议、报告结构与
+fail-loud 语义不变: NODE_START 现在由各节点自行推送, runner 只负责回放,
+因此线性与多智能体两种拓扑都能维持「开始 → 思考 → 完成」的事件时间线。
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from functools import lru_cache
 from typing import Any
@@ -26,29 +36,43 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.base import BaseAgent
-from app.agent.state import AgentState
+from app.agent.state import AgentMessage, AgentState
+from app.agent.sub_agents.coordinator_agent import CoordinatorAgent
 from app.agent.sub_agents.extractor_agent import ExtractorAgent
 from app.agent.sub_agents.negotiator_agent import NegotiatorAgent
 from app.agent.sub_agents.retriever_agent import RetrieverAgent
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
+from app.agent.sub_agents.verifier_agent import VerifierAgent
 from app.models.analysis import AnalysisResult, RiskItem
 from app.models.contract import Contract
 from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 
-#: 工作流节点序列 (线性链, 顺序即执行顺序)
-_NODE_SEQ: list[tuple[str, str]] = [
+#: 旧版线性流水线 (回退模式)
+_LINEAR_SEQ: list[tuple[str, str]] = [
     ("extractor", "📝 结构化抽取 — 正在整理合同条款…"),
     ("retriever", "⚖️ 法规检索 — 正在查询相关劳动法条文…"),
     ("reviewer", "🔍 风险审查 — 正在评估风险并核验依据…"),
     ("negotiator", "🗣️ 运营与谈判 — 正在整理义务并生成话术…"),
 ]
 
+#: 多智能体协作链路 (默认模式)
+_MULTI_SEQ: list[tuple[str, str]] = [
+    ("coordinator", "🧭 协调调度 — 正在分派审查任务…"),
+    ("extractor", "📝 结构化抽取 — 正在整理合同条款…"),
+    ("retriever", "⚖️ 法规检索 — 正在查询相关劳动法条文…"),
+    ("reviewer", "🔍 风险审查 — 正在评估风险并核验依据…"),
+    ("verifier", "🧪 独立复核 — 正在交叉验证依据与结论…"),
+    ("negotiator", "🗣️ 运营与谈判 — 正在整理义务并生成话术…"),
+]
+
 _AGENTS: dict[str, BaseAgent] = {
     a.name: a
     for a in [
+        CoordinatorAgent(),
         ExtractorAgent(),
         RetrieverAgent(),
         ReviewerAgent(),
+        VerifierAgent(),
         NegotiatorAgent(),
     ]
 }
@@ -58,18 +82,52 @@ _AGENTS: dict[str, BaseAgent] = {
 _CRITICAL_NODES: frozenset[str] = frozenset({"extractor", "reviewer"})
 
 
+def _current_mode() -> str:
+    """当前编排模式: multi (默认) / linear (回退)."""
+    mode = os.getenv("AGENT_MODE", "multi").strip().lower()
+    return mode if mode in ("multi", "linear") else "multi"
+
+
+def _field(state: Any, key: str, default: Any) -> Any:
+    """条件边兼容 dict / AgentState 两种状态载体."""
+    if isinstance(state, dict):
+        return state.get(key, default)
+    return getattr(state, key, default)
+
+
 def _node_action(agent: BaseAgent, idx: int, total: int) -> Any:
     """构造 LangGraph 节点动作.
 
-    执行对应子智能体, 将本轮节点事件 (错误提示/完成/风险逐条) 追加到
-    ``state.events`` 后返回全量状态更新; NODE_START 由 runner 按图预推。
+    每个节点 = 一个自治智能体: 先推 NODE_START, 执行智能体, 广播 result 消息,
+    再追加 NODE_COMPLETE (reviewer 追加 RISK_FOUND)。事件按序累积进
+    ``state.events``, 由 ``run_contract_analysis`` 沿 SSE 协议回放。
     """
+
     async def action(state: AgentState) -> dict[str, Any]:
+        events: list[SSEEvent] = [
+            SSEEvent(
+                event=SSEEventType.NODE_START,
+                data=AgentNodeProgress(
+                    node_name=agent.name,
+                    description=agent.description,
+                    progress=idx / total,
+                ).model_dump(),
+            )
+        ]
+
         prev_error_len = len(state.errors)
         state = await agent(state)  # BaseAgent.__call__: 捕获异常写入 errors
         state.agent_trace.append(agent.name)
+        state.agent_messages.append(
+            AgentMessage(
+                sender=agent.name,
+                recipient="broadcast",
+                kind="result",
+                content=f"{agent.description.split('—')[0].strip()} 已完成",
+                round=state.review_rounds,
+            )
+        )
 
-        events: list[SSEEvent] = []
         if len(state.errors) > prev_error_len:
             if agent.name in _CRITICAL_NODES:
                 # 关键节点失败: 标记降级, 全图结束后不再产出「已完成」报告
@@ -85,7 +143,7 @@ def _node_action(agent: BaseAgent, idx: int, total: int) -> Any:
                 event=SSEEventType.NODE_COMPLETE,
                 data=AgentNodeProgress(
                     node_name=agent.name,
-                    description=f"{agent.description.split('—')[0]}✅ 完成",
+                    description=f"{agent.description.split('—')[0].strip()} ✅ 完成",
                     progress=(idx + 1) / total,
                 ).model_dump(),
             )
@@ -107,37 +165,59 @@ def _node_action(agent: BaseAgent, idx: int, total: int) -> Any:
     return action
 
 
+def _route_after_review(state: Any) -> str:
+    """条件边: Coordinator 未编排 verifier 时直接放行到谈判."""
+    plan = _field(state, "agent_plan", [])
+    return "verifier" if "verifier" in plan else "negotiator"
+
+
+def _route_after_verify(state: Any) -> str:
+    """条件边: Verifier 否决且未达返工上限 → 退回 Reviewer 重审."""
+    verdict = _field(state, "verdict", "")
+    rounds = _field(state, "review_rounds", 0)
+    max_rounds = _field(state, "max_review_rounds", 1)
+    return "rework" if verdict == "rework" and rounds <= max_rounds else "approve"
+
+
 @lru_cache
-def build_contract_graph() -> Any:
-    """构建并编译 LangGraph 合同审查图 (进程级缓存)."""
-    total = len(_NODE_SEQ)
+def build_contract_graph(mode: str = "multi") -> Any:
+    """构建并编译 LangGraph 合同审查图 (按模式进程级缓存)."""
+    if mode not in ("multi", "linear"):
+        mode = "multi"
+    seq = _MULTI_SEQ if mode == "multi" else _LINEAR_SEQ
+    total = len(seq)
+
     graph = StateGraph(AgentState)
-    for idx, (name, _description) in enumerate(_NODE_SEQ):
+    for idx, (name, _description) in enumerate(seq):
         graph.add_node(name, _node_action(_AGENTS[name], idx, total))
 
-    graph.add_edge(START, _NODE_SEQ[0][0])
-    for i in range(total - 1):
-        graph.add_edge(_NODE_SEQ[i][0], _NODE_SEQ[i + 1][0])
-    graph.add_edge(_NODE_SEQ[-1][0], END)
+    graph.add_edge(START, seq[0][0])
+
+    if mode == "linear":
+        for i in range(total - 1):
+            graph.add_edge(seq[i][0], seq[i + 1][0])
+        graph.add_edge(seq[-1][0], END)
+    else:
+        graph.add_edge("coordinator", "extractor")
+        graph.add_edge("extractor", "retriever")
+        graph.add_edge("retriever", "reviewer")
+        graph.add_conditional_edges(
+            "reviewer",
+            _route_after_review,
+            {"verifier": "verifier", "negotiator": "negotiator"},
+        )
+        graph.add_conditional_edges(
+            "verifier",
+            _route_after_verify,
+            {"rework": "reviewer", "approve": "negotiator"},
+        )
+        graph.add_edge("negotiator", END)
 
     compiled = graph.compile()
     logger.info(
-        f"🕸️ LangGraph 工作流就绪 | 节点: {[n for n, _ in _NODE_SEQ]}"
+        f"🕸️ LangGraph 工作流就绪 | 模式: {mode} | 节点: {[n for n, _ in seq]}"
     )
     return compiled
-
-
-def _start_event(idx: int, total: int) -> SSEEvent:
-    """构造 NODE_START 事件 (runner 按线性图顺序推送)."""
-    name, description = _NODE_SEQ[idx]
-    return SSEEvent(
-        event=SSEEventType.NODE_START,
-        data=AgentNodeProgress(
-            node_name=name,
-            description=description,
-            progress=idx / total,
-        ).model_dump(),
-    )
 
 
 async def run_contract_analysis(
@@ -149,38 +229,31 @@ async def run_contract_analysis(
     执行 LangGraph 合同分析工作流, 异步生成 SSE 事件流.
 
     - 以 ``graph.astream`` 逐节点推进并回放节点事件;
-    - NODE_START 按图顺序预推, 保持「节点开始 → 思考 → 完成」时间线;
+    - NODE_START 由各节点自行推送, runner 只回放, 兼容线性/多智能体拓扑;
     - 全图结束后持久化结果并推送 SUMMARY / COMPLETE。
     """
-    logger.info(f"🚀 Agent 工作流启动 (LangGraph) | 合同ID: {contract_id}")
+    mode = _current_mode()
+    logger.info(
+        f"🚀 Agent 工作流启动 (LangGraph/{mode}) | 合同ID: {contract_id}"
+    )
 
-    graph = build_contract_graph()
+    graph = build_contract_graph(mode)
     initial = AgentState(contract_id=contract_id, raw_text=raw_text)
-    total = len(_NODE_SEQ)
-
-    # 预推首个节点 START, 让前端立即展示第一阶段
-    yield _start_event(0, total)
 
     final_state = initial
     emitted = 0
-    completed = 0
     try:
         async for raw in graph.astream(initial, stream_mode="values"):
-            if completed == 0 and emitted == 0 and raw == initial.model_dump():
+            if emitted == 0 and raw == initial.model_dump():
                 continue  # astream 首项为初始状态快照
             state = AgentState(**raw)
             final_state = state
-            completed += 1
 
-            # 回放本节点新产生的事件 (THINKING/NODE_COMPLETE/RISK_FOUND)
+            # 回放本节点新产生的事件 (NODE_START/THINKING/NODE_COMPLETE/RISK_FOUND)
             if len(state.events) > emitted:
                 for event in state.events[emitted:]:
                     yield event
                 emitted = len(state.events)
-
-            # 线性链: 还有后继节点则预推其 NODE_START
-            if completed < total:
-                yield _start_event(completed, total)
     except Exception as e:
         logger.exception(f"❌ LangGraph 工作流异常 | 合同ID: {contract_id}")
         yield SSEEvent(
@@ -219,6 +292,9 @@ async def run_contract_analysis(
             "confidence_score": final_state.confidence_score,
             "quality_issues": final_state.quality_issues,
             "contract_facts": final_state.contract_facts,
+            "agent_mode": mode,
+            "agent_trace": final_state.agent_trace,
+            "review_rounds": final_state.review_rounds,
             # 内容提示: 提交内容被判定为疑似非合同时非空, 前端据此在报告顶部标注
             "content_notice": content_notice,
         },
@@ -230,7 +306,7 @@ async def run_contract_analysis(
     )
 
     logger.info(
-        f"🏁 LangGraph 工作流完成 | 合同ID: {contract_id} | "
+        f"🏁 LangGraph 工作流完成 | 合同ID: {contract_id} | 模式: {mode} | "
         f"评分: {final_state.overall_score}/100 | 风险: {len(final_state.risk_assessments)} 项"
     )
 

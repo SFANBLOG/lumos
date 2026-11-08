@@ -3,6 +3,10 @@ Agent 状态定义.
 
 定义 LangGraph 流转过程中的统一状态结构，
 每个节点读取并更新此状态，形成完整的思考链路。
+
+多智能体模式下, ``agent_messages`` 是智能体之间的显式消息总线:
+Coordinator 下发任务 (task/plan), 各智能体广播结果 (result),
+Verifier 发送复核结论 (rework/handoff), 图中的条件边据此动态路由。
 """
 
 from __future__ import annotations
@@ -56,6 +60,23 @@ class RiskAssessment(BaseModel):
     score: int = Field(ge=0, le=100, description="单项评分 (100=安全)")
 
 
+# ─── 智能体间消息 ──────────────────────────────────────────────
+
+
+class AgentMessage(BaseModel):
+    """一条智能体间消息 (消息总线).
+
+    ``kind``: plan / task / result / rework / verdict / handoff
+    ``recipient``: 具体智能体名, 或 "broadcast" 表示全员广播.
+    """
+
+    sender: str = Field(description="发送方智能体")
+    recipient: str = Field(description="接收方智能体或 broadcast")
+    kind: str = Field(description="消息类型")
+    content: str = Field(default="", description="消息内容 / 决策依据")
+    round: int = Field(default=0, ge=0, description="所属审查轮次")
+
+
 # ─── LangGraph 全局状态 ────────────────────────────────────────
 
 
@@ -63,7 +84,7 @@ class AgentState(BaseModel):
     """
     LangGraph 工作流的全局状态.
 
-    每个 Node 读取需要的字段，处理后更新对应字段，
+    每个智能体读取需要的字段，处理后更新对应字段，
     状态就像流水线上的「工单」，沿着 Graph 逐步被充实完整。
     """
 
@@ -109,10 +130,26 @@ class AgentState(BaseModel):
     ai_degraded: bool = Field(default=False, description="AI 模型不可用导致审查降级")
     agent_trace: list[str] = Field(
         default_factory=list,
-        description="已执行的子智能体名称列表 (执行轨迹)",
+        description="已执行的子智能体名称列表 (执行轨迹, 含返工重复执行)",
     )
-    # LangGraph 节点执行期间产生的事件 (THINKING/NODE_COMPLETE/RISK_FOUND),
-    # 由 run_contract_analysis 回放为 SSE 帧; NODE_START 由 runner 按图顺序推送
+
+    # ── 多智能体协作 ──
+    agent_messages: list[AgentMessage] = Field(
+        default_factory=list,
+        description="智能体间消息总线 (任务分派 / 结果广播 / 复核返工 / 交接)",
+    )
+    agent_plan: list[str] = Field(
+        default_factory=list,
+        description="Coordinator 动态编排的参与智能体清单",
+    )
+    verdict: str = Field(default="", description="Verifier 结论: rework / approve")
+    review_rounds: int = Field(default=0, ge=0, description="已发起的返工轮次")
+    max_review_rounds: int = Field(
+        default=1, ge=0, le=3, description="允许的返工上限, 防止无限循环"
+    )
+
+    # LangGraph 节点执行期间产生的事件 (NODE_START/THINKING/NODE_COMPLETE/RISK_FOUND),
+    # 由 run_contract_analysis 回放为 SSE 帧
     events: list[SSEEvent] = Field(
         default_factory=list,
         description="工作流事件累积 (供 SSE 回放与测试断言)",

@@ -108,6 +108,15 @@ def sample_state() -> AgentState:
     return AgentState(contract_id="test-contract", raw_text=_CONTRACT_TEXT)
 
 
+@pytest.fixture(autouse=True)
+def _linear_agent_mode(monkeypatch) -> None:
+    """本文件验证线性回退路径, 固定 AGENT_MODE=linear.
+
+    多智能体默认编排的行为由 tests/test_multi_agent.py 覆盖。
+    """
+    monkeypatch.setenv("AGENT_MODE", "linear")
+
+
 def _collect(agen: AsyncGenerator[SSEEvent, None]) -> list[SSEEvent]:
     """同步收集异步事件生成器 (每次新建事件循环, 避免跨用例污染)."""
     import asyncio
@@ -127,7 +136,7 @@ class TestWorkflowGraph:
     def test_state_flows_through_pipeline(self, fake_llm, fake_mcp) -> None:
         import asyncio
 
-        graph = build_contract_graph()
+        graph = build_contract_graph("linear")
         raw = asyncio.run(
             graph.ainvoke(AgentState(contract_id="g-1", raw_text=_CONTRACT_TEXT))
         )

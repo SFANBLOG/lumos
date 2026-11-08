@@ -49,7 +49,7 @@
 | **MinerU 版面解析** | 复杂版面的合同 PDF 可选接入 **MinerU**（本机 `mineru-kit` / `mineru` CLI 或内网 HTTP 解析服务）做版面检测、阅读顺序还原、表格/公式识别与 OCR，输出 Markdown + `content_list` 结构化块；版面中切出的公章/签名/手写批注图片块再交给**多模态视觉大模型**补识并回填原位置。未安装 MinerU 时自动回退内置 pypdf + PyMuPDF + OCR 链路，`/ingest/file` 返回 `parse_meta` 说明本次解析引擎与回退原因（详见 §5.2） |
 | **「说人话」的条款解读** | AI 将晦涩法律术语翻译成「大白话」，并附上具体法律依据，告诉你"这条到底是什么意思" |
 | **一键生成谈判话术** | 不只告诉你坑在哪，还生成可直接复制、通过微信发送的专业话术，有理有据，不卑不亢 |
-| **LangGraph 分析引擎** | 以 **LangGraph StateGraph** 编排 Extract → Retrieve → Review → Negotiate 四节点流水线，节点共享 `AgentState`，事件按序累积回放为 SSE 时间线 |
+| **多智能体分析引擎** | 以 **LangGraph StateGraph** 编排 Coordinator → Extractor → Retriever → Reviewer → Verifier → Negotiator 六个自治智能体，通过消息总线协作；Verifier 可否决结论并触发条件返工，事件累积回放为 SSE 时间线（`AGENT_MODE=linear` 可回退旧四节点链路） |
 | **混合检索 RAG** | **真实 embedding 模型**（默认本地 sentence-transformers，可切 API）向量化法条语料；检索 = **双路召回**（Milvus 向量 + BM25 jieba 分词）→ **RRF 融合** → **精排**（Reranker 重排 + 相似度阈值过滤），答案可溯源到具体法条；风险审查节点对 `legal_basis` 抽取「法名+条号」与召回法条逐条溯源核验，命中不了标注待人工复核并扣减置信度 |
 | **SSE 流式实时推送** | 分析全过程以 SSE 事件流实时推送，前端展示思考过程时间线，体验透明可信 |
 | **智能咨询** | 独立于合同分析的智能问答模块，支持法律问题自由咨询，关联已分析合同风险上下文 |
@@ -101,7 +101,7 @@
 | 技术 | 说明 |
 |:---|:---|
 | FastAPI (Python 3.11+) | 极速异步框架 + 自动 Swagger 文档 |
-| LangGraph 1.x | 真 `StateGraph` 工作流：extract → retrieve → review → negotiate，共享 Pydantic `AgentState` |
+| LangGraph 1.x | 真 `StateGraph` 多智能体图：coordinator → extract → retrieve → review → verifier → negotiate，含条件边与返工回边，共享 Pydantic `AgentState` 与 `agent_messages` 消息总线 |
 | LangChain / OpenAI SDK | 任意 OpenAI 兼容接口（DeepSeek / Claude / 通义千问等） |
 | SQLModel + aiomysql | 异步 ORM，MySQL 持久化 |
 | 真实 Embedding | `sentence-transformers` 本地模型（默认 `BAAI/bge-base-zh-v1.5`，768 维中文检索，BGE query 指令优化）或 OpenAI 兼容 API 双 Provider；向量索引按「语料 + embedding 签名」自动隔离重建 |
@@ -206,7 +206,7 @@ sequenceDiagram
     G-->>U: SUMMARY + COMPLETE
 ```
 
-各节点通过 `graph.astream` 推进：节点内产生的 `THINKING / NODE_COMPLETE / RISK_FOUND` 事件按序累积进 `state.events`，runner 增量回放，`NODE_START` 按图顺序预推——保持「节点开始 → 思考 → 完成」的原始时间线语义。任一节点异常不中断全图：子智能体捕获错误写入 `state.errors` 并转为 `THINKING` 警告事件继续执行。
+各智能体通过 `graph.astream` 推进：节点内产生的 `NODE_START / THINKING / NODE_COMPLETE / RISK_FOUND` 事件按序累积进 `state.events`，runner 增量回放——线性与多智能体两种拓扑都保持「节点开始 → 思考 → 完成」的时间线语义。`NODE_START` 由各节点自行推送，因此条件边返工时也能正确回放多一轮事件。任一节点异常不中断全图：子智能体捕获错误写入 `state.errors` 并转为 `THINKING` 警告事件继续执行。
 
 ---
 
@@ -250,34 +250,43 @@ sequenceDiagram
 
 ## 六、Agent 与 MCP 架构
 
-### 6.1 LangGraph 工作流（4 个节点，由子智能体执行）
+### 6.1 多智能体协作工作流（6 个自治智能体 + 条件返工）
 
 ```
-StateGraph(AgentState)
+StateGraph(AgentState) · AGENT_MODE=multi (默认)
  │   START
  ▼
+ ├─ 🧭 coordinator  — CoordinatorAgent（自治编排: 定参与方 / 逐个下发 task 消息）
+ │     └─ agent_plan = [extractor, retriever, reviewer, verifier, negotiator]
+ ▼
  ├─ 📝 extractor    — ExtractorAgent  （文本抽取/OCR纠错/条款结构化）
- │     └─ skills: text_preprocessing
- ▼
  ├─ 📚 retriever    — RetrieverAgent  （混合法规检索 RAG）
- │     └─ 工具: law_search
- ▼
  ├─ ⚖️ reviewer     — ReviewerAgent   （风险审查/评分）
- │     └─ skills: legal_analysis, risk_scoring
- │     └─ 工具: risk_assess, clause_analyze
+ ▼
+ ├─ 🧪 verifier     — VerifierAgent   （独立复核: 原文定位 + 法条溯源交叉验证）
+ │     ├─ 不通过 → 给 reviewer 发 rework 消息 ──┐
+ │     │                                        │ 条件边回边 (≤ max_review_rounds)
+ │     └────────────────────────────────────────┘
+ │     └─ 通过/达上限 → 给 negotiator 发 handoff 消息
  ▼
  └─ 💬 negotiator   — NegotiatorAgent （谈判策略生成）
-       └─ 工具: negotiation
  ▼
  END
+
+ 每个智能体执行完广播 result 消息，全部协作轨迹落在 state.agent_messages。
+ AGENT_MODE=linear 时退回旧四节点线性链（无 coordinator / verifier / 条件边）。
 ```
 
-| 节点 / 子智能体 | key | 擅长场景 |
+| 节点 / 子智能体 | key | 擅长场景 / 自治决策 |
 |---|---|---|
+| CoordinatorAgent | `coordinator` | 按合同规模决定参与智能体（极短文本跳过 verifier），通过消息总线下发 task；确定性规则保证编排可审计 |
 | ExtractorAgent | `extractor` | 合同文本清洗、OCR 纠错、条款结构化拆分 |
 | RetrieverAgent | `retriever` | 劳动法条文混合检索（双路召回 + RRF 融合 + 精排）、RAG 召回 |
-| ReviewerAgent | `reviewer` | 风险多维度打分、法律依据生成、谈判话术 |
+| ReviewerAgent | `reviewer` | 风险多维度打分、法律依据生成；收到 rework 消息时重新审查 |
+| VerifierAgent | `verifier` | 独立交叉核验原文定位与法条溯源；**可否决结论**并发起返工，通过后 handoff |
 | NegotiatorAgent | `negotiator` | 补充谈判话术，确保每条风险都有应对策略 |
+
+消息类型：`plan` / `task` / `result` / `rework` / `handoff`，均带 `sender`、`recipient`、`round`，可完整回溯「谁让谁重审、为什么」。
 
 **额外独立智能体：**
 
@@ -285,7 +294,7 @@ StateGraph(AgentState)
 |---|---|---|
 | ConsultantAgent | `consultant` | 独立于合同分析流的智能咨询模块，支持多轮对话、法条引用、追问建议 |
 
-工作流实现在 `backend/app/agent/graph.py`（`build_contract_graph` 编译图 + `run_contract_analysis` SSE 运行器），节点动作由 `_node_action` 统一包装——子智能体执行 + 错误捕获 + 事件累积。
+工作流实现在 `backend/app/agent/graph.py`（`build_contract_graph(mode)` 按模式编译图 + `run_contract_analysis` SSE 运行器），节点动作由 `_node_action` 统一包装——子智能体执行 + 消息广播 + 错误捕获 + 事件累积；条件边 `_route_after_review` / `_route_after_verify` 实现动态路由与返工闭环。
 
 ### 6.2 技能系统（Skills）
 
@@ -480,7 +489,7 @@ python -m pytest -m "not e2e"          # 跳过需要真实模型/服务的用�
 LUMOS_E2E=1 python -m pytest -m e2e    # 端到端检索链路用例（需 embedding 模型就绪）
 ```
 
-- 当前 **100+ 条 pytest 用例**（其中 14 条为 MinerU 版面解析 / 视觉补识 / 回退分支，2 条 e2e 需 `LUMOS_E2E=1`），覆盖：**MinerU CLI/HTTP 两后端、content_list 归一化、图片块视觉补识、auto 回退与 fail-loud**（见 `backend/tests/test_mineru_parser.py`）、API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、表格跨栏合并、多栏栏感知抽取、Embedding/Chroma 降级兜底（见 `backend/tests/`）；
+- 当前 **140+ 条 pytest 用例**（含 7 条多智能体协作测试：`backend/tests/test_multi_agent.py`）（其中 14 条为 MinerU 版面解析 / 视觉补识 / 回退分支，2 条 e2e 需 `LUMOS_E2E=1`），覆盖：**MinerU CLI/HTTP 两后端、content_list 归一化、图片块视觉补识、auto 回退与 fail-loud**（见 `backend/tests/test_mineru_parser.py`）、API 冒烟、BM25 分词与领域词典、RRF 混合融合、向量通道异常时仅 BM25 降级兜底、LangGraph 状态流转与错误恢复、扫描/混排 PDF 逐页混合 OCR 分支、A2A 协议适配层、表格跨栏合并、多栏栏感知抽取、Embedding/Chroma 降级兜底（见 `backend/tests/`）；
 - **MinerU 相关 14 条用例全部可离线运行**：以打桩的 `subprocess.run`、假 httpx 模块、假 pypdf 注入，不依赖真实 MinerU 模型权重、网络或视觉 API Key；`tests/conftest.py` 把 PDF 策略默认固定为 `legacy`，保证既有 OCR / 版面用例不受「开发机是否装有 MinerU」影响。
 - 单元测试曾真实发现并修复两个生产缺陷：rank_bm25 查询需预分词（逐字符迭代产生伪分数）、jieba 需注册法律领域词典（「竞业限制」被错误切词）。
 
@@ -620,10 +629,10 @@ lumos/
 │   ├── app/
 │   │   ├── agent/                     # LangGraph 编排层
 │   │   │   ├── graph.py               # StateGraph 构建 + SSE 运行器 run_contract_analysis
-│   │   │   ├── state.py               # LangGraph AgentState（共享状态 + events 通道）
+│   │   │   ├── state.py               # LangGraph AgentState（共享状态 + 消息总线 + events 通道）
 │   │   │   ├── base.py                # 子智能体抽象基类 BaseAgent
 │   │   │   ├── llm.py                 # LLM 客户端工厂（ChatOpenAI / Vision）
-│   │   │   └── sub_agents/            # Extractor/Retriever/Reviewer/Negotiator/Consultant
+│   │   │   └── sub_agents/            # Coordinator/Extractor/Retriever/Reviewer/Verifier/Negotiator/Consultant
 │   │   ├── rag/                       # 混合检索（真实 embedding + 双路召回 + RRF + 精排）
 │   │   │   ├── embeddings.py          # 双 Provider embedding（local / API），签名隔离
 │   │   │   ├── milvus_store.py        # Milvus 集合管理 + 检索（COSINE/动态维度）
