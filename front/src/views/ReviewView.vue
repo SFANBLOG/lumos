@@ -65,6 +65,12 @@
           </button>
         </div>
 
+        <ReviewEnhancements
+          :facts="contractFacts"
+          :clauses="missingClauses"
+          :coverage="coverageScore"
+        />
+
         <div class="risk-list" v-loading="loading">
           <article v-for="(risk, index) in visibleRisks" :key="index" class="risk-card">
             <div class="risk-card-head">
@@ -79,11 +85,27 @@
               <span class="clause-label">原文</span>
               {{ risk.original_clause }}
             </div>
+            <div v-if="risk.suggested_revision" class="revision">
+              <span class="revision-label">建议改为</span>
+              {{ risk.suggested_revision }}
+            </div>
             <div class="risk-foot">
               <span class="risk-cat">{{ categoryLabel(risk.category) }}</span>
               <button class="locate-btn" @click="locateRisk(risk)">
                 <el-icon><Position /></el-icon>
                 定位原文
+              </button>
+            </div>
+            <div class="feedback-row">
+              <span class="feedback-label">这条结论</span>
+              <button
+                v-for="opt in feedbackOptions"
+                :key="opt.key"
+                class="feedback-btn"
+                :class="{ active: feedbackMap[feedbackKey(risk)] === opt.key }"
+                @click="submitFeedback(risk, opt.key)"
+              >
+                {{ opt.label }}
               </button>
             </div>
           </article>
@@ -114,7 +136,14 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import DocViewer from '@/components/DocViewer.vue'
-import { contractApi, type RiskItemData } from '@/api/contract'
+import ReviewEnhancements from '@/components/ReviewEnhancements.vue'
+import {
+  contractApi,
+  type ContractFactData,
+  type MissingClauseData,
+  type RiskItemData,
+} from '@/api/contract'
+import { reviewApi, type FeedbackVerdict } from '@/api/review'
 import { DEMO_CONTRACTS, DEMO_CONTRACT_TEXT } from '@/mock/demo'
 import { categoryLabel } from '@/utils/contractMeta'
 import { levelMeta } from '@/utils/contractDisplay'
@@ -134,6 +163,18 @@ const reportSummary = ref('')
 const riskScore = ref(90)
 const activeTab = ref<'all' | 'high' | 'medium' | 'low'>('all')
 const viewerRef = ref<InstanceType<typeof DocViewer> | null>(null)
+
+// 审查增强层: 要素核对表 / 缺失条款 / 覆盖率 / 风险反馈
+const contractFacts = ref<ContractFactData[]>([])
+const missingClauses = ref<MissingClauseData[]>([])
+const coverageScore = ref(100)
+const feedbackMap = ref<Record<string, FeedbackVerdict>>({})
+const feedbackOptions: { key: FeedbackVerdict; label: string }[] = [
+  { key: 'accepted', label: '认可' },
+  { key: 'false_positive', label: '误报' },
+  { key: 'ignored', label: '忽略' },
+]
+const feedbackKey = (risk: RiskItemData) => risk.id || risk.title
 
 const fileName = computed(() => `${contractName.value.replace(/[\\/:*?"<>|]/g, '')}.docx`)
 
@@ -219,6 +260,12 @@ const loadContract = async () => {
   const demo = DEMO_CONTRACTS.find((item) => item.id === id)
   const queryName = typeof route.query.name === 'string' ? route.query.name : ''
 
+  // 切换合同时清掉上一份报告的增强数据, 避免串数据
+  contractFacts.value = []
+  missingClauses.value = []
+  coverageScore.value = 100
+  feedbackMap.value = {}
+
   if (demo) {
     isDemo.value = true
     contractName.value = demo.name
@@ -250,6 +297,16 @@ const loadContract = async () => {
       risks.value = report.risk_items
       reportSummary.value = report.summary
       riskScore.value = Math.max(0, Math.min(100, 100 - (report.overall_score ?? 0)))
+      contractFacts.value = report.contract_facts ?? []
+      missingClauses.value = report.missing_clauses ?? []
+      coverageScore.value = report.coverage_score ?? 100
+      // 回显已有的风险反馈, 刷新页面后不丢判定
+      const fb = await reviewApi.listFeedback(id).catch(() => null)
+      if (fb?.data?.length) {
+        const map: Record<string, FeedbackVerdict> = {}
+        fb.data.forEach((item) => { map[item.risk_item_id] = item.verdict })
+        feedbackMap.value = map
+      }
     } else {
       risks.value = []
       ElMessage.info('该合同尚未生成审查报告，可先查看原始文档')
@@ -292,23 +349,51 @@ const buildReportText = () => {
     `合同名称：${contractName.value}`,
     `合同编号：${contractCode.value}`,
     `风险指数：${riskScore.value}`,
+    `必备条款覆盖率：${coverageScore.value}%`,
     reportSummary.value ? `审查结论：${reportSummary.value}` : '',
     '',
   ]
+  if (missingClauses.value.length) {
+    lines.push('【缺失条款与建议补充】')
+    missingClauses.value.forEach((item) => {
+      lines.push(`- ${item.label}：${item.suggested_text}`)
+    })
+    lines.push('')
+  }
   risks.value.forEach((risk, index) => {
     lines.push(
       `${index + 1}. [${levelMeta(risk.level).text}] ${risk.title}`,
       `   原文：${risk.original_clause || '—'}`,
       `   解读：${risk.explanation || '—'}`,
       `   依据：${risk.legal_basis || '—'}`,
-      `   建议：${risk.negotiation_tip || '—'}`,
+      `   建议改为：${risk.suggested_revision || '—'}`,
+      `   沟通话术：${risk.negotiation_tip || '—'}`,
       ''
     )
   })
   return lines.filter(Boolean).join('\n')
 }
 
-const downloadReport = () => {
+const downloadReport = async () => {
+  const id = typeof route.query.id === 'string' ? route.query.id : ''
+  // 真实合同走后端带批注 Word 导出; 演示数据未落库, 回退到前端文本报告
+  if (id && !isDemo.value) {
+    try {
+      const res = await contractApi.exportReport(id, 'docx')
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `审查报告-${contractName.value}.docx`
+      link.click()
+      URL.revokeObjectURL(link.href)
+      ElMessage.success('带批注 Word 报告已导出')
+      return
+    } catch {
+      ElMessage.warning('后端导出失败，已回退为文本报告')
+    }
+  }
   const blob = new Blob([buildReportText()], { type: 'text/plain;charset=utf-8' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
@@ -316,6 +401,25 @@ const downloadReport = () => {
   link.click()
   URL.revokeObjectURL(link.href)
   ElMessage.success('审查报告已导出')
+}
+
+const submitFeedback = async (risk: RiskItemData, verdict: FeedbackVerdict) => {
+  const contractId = typeof route.query.id === 'string' ? route.query.id : ''
+  if (!risk.id || !contractId || isDemo.value) {
+    ElMessage.warning('演示数据不支持提交反馈，请先审查一份真实合同')
+    return
+  }
+  try {
+    await reviewApi.submitFeedback({
+      risk_item_id: risk.id,
+      contract_id: contractId,
+      verdict,
+    })
+    feedbackMap.value = { ...feedbackMap.value, [feedbackKey(risk)]: verdict }
+    ElMessage.success('反馈已记录，将用于优化审查规则')
+  } catch {
+    ElMessage.error('反馈提交失败')
+  }
 }
 
 const generateReport = () => {
@@ -331,6 +435,53 @@ onMounted(loadContract)
 </script>
 
 <style scoped>
+.revision {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: #eef4ff;
+  border-left: 3px solid var(--qz-primary, #1d4ed8);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--qz-ink-1);
+}
+.revision-label {
+  display: inline-block;
+  margin-right: 8px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+.feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--qz-line);
+}
+.feedback-label {
+  font-size: 12px;
+  color: var(--qz-ink-3);
+  margin-right: auto;
+}
+.feedback-btn {
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--qz-line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--qz-ink-2);
+  cursor: pointer;
+}
+.feedback-btn:hover {
+  border-color: var(--qz-primary-line, #93b4ff);
+  color: var(--qz-primary, #1d4ed8);
+}
+.feedback-btn.active {
+  background: var(--qz-primary, #1d4ed8);
+  border-color: var(--qz-primary, #1d4ed8);
+  color: #ffffff;
+}
 .review-page {
   display: flex;
   flex-direction: column;

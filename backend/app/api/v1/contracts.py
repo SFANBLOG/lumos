@@ -21,10 +21,12 @@ from sqlmodel import select
 from app.api.deps import AuthAny, DBSession
 from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
+from app.models.review import ContractFactItem, MissingClauseItem
 from app.services import analysis_task
 from app.services.audit import record_audit_event
 from app.services.contract_guard import check_document
 from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse
+from app.schemas.review import ContractFactResponse, MissingClauseResponse
 from app.schemas.contract import (
     ContractCreateRequest,
     ContractListResponse,
@@ -341,12 +343,50 @@ async def get_report(
     result = await session.execute(stmt)
     risk_items = result.scalars().all()
 
+    # 审查增强层: 要素核对表 + 缺失条款清单
+    fact_stmt = (
+        select(ContractFactItem)
+        .where(ContractFactItem.analysis_id == analysis.id)
+        .order_by(ContractFactItem.order)
+    )
+    facts = (await session.execute(fact_stmt)).scalars().all()
+    missing_stmt = (
+        select(MissingClauseItem)
+        .where(MissingClauseItem.analysis_id == analysis.id)
+        .order_by(MissingClauseItem.order)
+    )
+    missing = (await session.execute(missing_stmt)).scalars().all()
+    required = [f for f in facts if f.required]
+    coverage = (
+        round(100 * sum(1 for f in required if f.status == "present") / len(required))
+        if required
+        else 100
+    )
+
     return AnalysisReportResponse(
         contract_id=contract_id,
         overall_score=analysis.overall_score,
         overall_level=analysis.overall_level,
         summary=analysis.summary,
-        risk_items=[RiskItemResponse.model_validate(item) for item in risk_items],
+        risk_items=[
+            RiskItemResponse(
+                id=item.id,
+                category=item.category,
+                level=item.level,
+                title=item.title,
+                original_clause=item.original_clause,
+                explanation=item.explanation,
+                legal_basis=item.legal_basis,
+                negotiation_tip=item.negotiation_tip,
+                # 旧库通过 ALTER 补的列允许 NULL, 统一兜底成空串
+                suggested_revision=item.suggested_revision or "",
+                score=item.score,
+            )
+            for item in risk_items
+        ],
+        contract_facts=[ContractFactResponse.model_validate(f) for f in facts],
+        missing_clauses=[MissingClauseResponse.model_validate(m) for m in missing],
+        coverage_score=coverage,
         content_notice=contract.doc_check_note,
         analyzed_at=analysis.created_at,
     )

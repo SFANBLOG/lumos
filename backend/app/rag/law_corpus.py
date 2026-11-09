@@ -350,7 +350,14 @@ def _load_full_corpus() -> list[dict]:
         if key not in seen:
             seen.add(key)
             unique.append(law)
-    return unique
+    # 注入生效日期 / 失效日期 / 地区 / 版本 / 来源, 再按当前日期过滤失效法规。
+    # 局部 import 保持 law_meta → law_corpus 的单向依赖; 语料内容变化会让
+    # corpus_hash() 改变, 从而自动触发向量库 / BM25 索引重建。
+    from app.rag.law_meta import active_laws, attach_metadata
+
+    for law in unique:
+        attach_metadata(law)
+    return active_laws(unique)
 
 
 ALL_LAWS: list[dict] = _load_full_corpus()

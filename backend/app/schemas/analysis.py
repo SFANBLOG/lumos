@@ -12,6 +12,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from app.models.analysis import RiskCategory, RiskLevel
+from app.schemas.review import ContractFactResponse, MissingClauseResponse
 
 
 # ─── SSE 事件类型 ──────────────────────────────────────────────
@@ -47,6 +48,7 @@ class SSEEvent(BaseModel):
 class RiskItemResponse(BaseModel):
     """单项风险条目响应."""
 
+    id: str = Field(default="", description="风险条目 ID, 提交风险反馈时使用")
     category: RiskCategory
     level: RiskLevel
     title: str = Field(description="风险标题 (说人话)")
@@ -54,6 +56,10 @@ class RiskItemResponse(BaseModel):
     explanation: str = Field(description="大白话解读")
     legal_basis: str = Field(default="", description="法律依据")
     negotiation_tip: str = Field(default="", description="谈判话术建议")
+    suggested_revision: str = Field(
+        default="",
+        description="条款级修改建议 (redline): 这一条应改成什么文本",
+    )
     score: int = Field(ge=0, le=100, description="单项评分")
 
     model_config = {"from_attributes": True}
@@ -72,6 +78,20 @@ class AnalysisReportResponse(BaseModel):
     risk_items: list[RiskItemResponse] = Field(
         default_factory=list,
         description="逐条风险清单 (按危险程度排序)",
+    )
+    contract_facts: list[ContractFactResponse] = Field(
+        default_factory=list,
+        description="合同要素核对表 (带原文定位与置信度)",
+    )
+    missing_clauses: list[MissingClauseResponse] = Field(
+        default_factory=list,
+        description="缺失/漏填的法定必备条款与应有保护条款",
+    )
+    coverage_score: int = Field(
+        default=100,
+        ge=0,
+        le=100,
+        description="必备条款覆盖率, 独立于 overall_score 与 confidence_score",
     )
     content_notice: str | None = Field(
         default=None,

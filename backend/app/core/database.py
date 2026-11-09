@@ -104,6 +104,19 @@ async def init_db() -> None:
                     await conn.execute(
                         text(f"ALTER TABLE contracts ADD COLUMN {column} {ddl}")
                     )
+            # 审查增强层: risk_items 新增条款级修改建议 (redline) 列。
+            # 允许 NULL 是为了兼容已有行, 读取侧统一用 ``or ""`` 兜底。
+            exists = await conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'risk_items' "
+                    "AND COLUMN_NAME = 'suggested_revision'"
+                )
+            )
+            if exists.scalar_one() == 0:
+                await conn.execute(
+                    text("ALTER TABLE risk_items ADD COLUMN suggested_revision MEDIUMTEXT NULL")
+                )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

@@ -45,6 +45,7 @@ from app.agent.sub_agents.reviewer_agent import ReviewerAgent
 from app.agent.sub_agents.verifier_agent import VerifierAgent
 from app.models.analysis import AnalysisResult, RiskItem
 from app.models.contract import Contract
+from app.models.review import ContractFactItem, MissingClauseItem
 from app.schemas.analysis import AgentNodeProgress, SSEEvent, SSEEventType
 
 #: 旧版线性流水线 (回退模式)
@@ -292,6 +293,10 @@ async def run_contract_analysis(
             "confidence_score": final_state.confidence_score,
             "quality_issues": final_state.quality_issues,
             "contract_facts": final_state.contract_facts,
+            # 审查增强层: 统一转成纯 dict, 兼容 SSE 侧的 json.dumps 序列化
+            "contract_fact_items": [f.model_dump() for f in final_state.contract_fact_items],
+            "missing_clauses": [m.model_dump() for m in final_state.missing_clauses],
+            "coverage_score": final_state.coverage_score,
             "agent_mode": mode,
             "agent_trace": final_state.agent_trace,
             "review_rounds": final_state.review_rounds,
@@ -344,7 +349,39 @@ async def _persist(state: AgentState, session: AsyncSession) -> str | None:
                     explanation=assessment.explanation,
                     legal_basis=assessment.legal_basis,
                     negotiation_tip=assessment.negotiation_tip,
+                    suggested_revision=assessment.suggested_revision,
                     score=assessment.score,
+                    order=idx,
+                )
+            )
+
+        # 审查增强层: 要素核对表与缺失条款清单随报告一起落库
+        for idx, fact in enumerate(state.contract_fact_items):
+            session.add(
+                ContractFactItem(
+                    analysis_id=analysis.id,
+                    key=fact.key,
+                    label=fact.label,
+                    value=fact.value,
+                    evidence=fact.evidence,
+                    confidence=fact.confidence,
+                    status=fact.status,
+                    required=fact.required,
+                    legal_basis=fact.legal_basis,
+                    order=idx,
+                )
+            )
+        for idx, clause in enumerate(state.missing_clauses):
+            session.add(
+                MissingClauseItem(
+                    analysis_id=analysis.id,
+                    key=clause.key,
+                    label=clause.label,
+                    reason=clause.reason,
+                    legal_basis=clause.legal_basis,
+                    suggested_text=clause.suggested_text,
+                    level=clause.level,
+                    score=clause.score,
                     order=idx,
                 )
             )

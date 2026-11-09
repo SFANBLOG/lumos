@@ -19,6 +19,15 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
+# 遗留失效用例: 生产 graph.py 已改为 multi/linear 双拓扑, 不再有
+# interrupt() / checkpointer / review_gate / resume_contract_analysis。
+# 人工复核改走 api/v1/approvals.py 的独立审批队列 (ApprovalTask)。
+# 保留文件仅作历史设计记录, 显式跳过以免收集阶段 ImportError 干扰测试结果。
+pytest.skip(
+    "遗留失效用例: 当前实现无 LangGraph interrupt/checkpoint 续跑, 人工复核走独立审批队列",
+    allow_module_level=True,
+)
+
 from app.agent.base import BaseAgent
 from app.agent.graph import (
     build_contract_graph,

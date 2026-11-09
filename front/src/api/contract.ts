@@ -46,6 +46,8 @@ export interface ContractStats {
 }
 
 export interface RiskItemData {
+  /** 风险条目 ID, 提交反馈时使用 (演示数据没有) */
+  id?: string
   category: string
   level: string
   title: string
@@ -53,6 +55,29 @@ export interface RiskItemData {
   explanation: string
   legal_basis: string
   negotiation_tip: string
+  /** 条款级修改建议 (redline): 这一条应改成什么文本 */
+  suggested_revision?: string
+  score: number
+}
+
+export interface ContractFactData {
+  key: string
+  label: string
+  value: string
+  evidence: string
+  confidence: number
+  status: string
+  required: boolean
+  legal_basis: string
+}
+
+export interface MissingClauseData {
+  key: string
+  label: string
+  reason: string
+  legal_basis: string
+  suggested_text: string
+  level: string
   score: number
 }
 
@@ -62,6 +87,12 @@ export interface AnalysisReport {
   overall_level: string
   summary: string
   risk_items: RiskItemData[]
+  /** 合同要素核对表 (带原文定位与置信度) */
+  contract_facts?: ContractFactData[]
+  /** 缺失/漏填的必备条款清单 */
+  missing_clauses?: MissingClauseData[]
+  /** 必备条款覆盖率, 独立于 overall_score 与 confidence_score */
+  coverage_score?: number
   /** 内容提示: 提交内容被判定为疑似非合同时给出 */
   content_notice?: string | null
   analyzed_at: string
@@ -87,6 +118,13 @@ export const contractApi = {
   },
   getReport(contractId: string) {
     return apiClient.get<AnalysisReport>(`/contracts/${contractId}/report`)
+  },
+  /** 后端带批注报告导出 (Markdown / Word), 返回二进制内容 */
+  exportReport(contractId: string, format: 'md' | 'docx' = 'docx') {
+    return apiClient.get(`/contracts/${contractId}/report/export`, {
+      params: { format },
+      responseType: 'blob',
+    })
   },
   /**
    * 订阅 SSE 分析流.

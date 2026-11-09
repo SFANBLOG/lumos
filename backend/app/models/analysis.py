@@ -123,6 +123,13 @@ class RiskItem(SQLModel, table=True):
         sa_column=Column("negotiation_tip", MEDIUM_TEXT, nullable=False),
         description="谈判话术建议",
     )
+    # 条款级修改建议 (redline). 旧库通过 init_db 的 ALTER 补列, 允许 NULL;
+    # 读取侧统一用 ``or ""`` 兜底, 避免历史行触发 pydantic 校验失败。
+    suggested_revision: str | None = Field(
+        default=None,
+        sa_column=Column("suggested_revision", MEDIUM_TEXT, nullable=True),
+        description="条款级修改建议: 这一条应改成什么文本",
+    )
     score: int = Field(default=0, ge=0, le=100, description="单项评分")
 
     # ---- 排序 ----

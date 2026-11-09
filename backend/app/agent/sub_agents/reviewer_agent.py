@@ -179,6 +179,11 @@ class ReviewerAgent(BaseAgent):
             self._fallback(state)
 
         self._apply_quality_gate(state)
+        # 让 SSE 的 RISK_FOUND 事件也带上条款级修改建议; 否则只有最终报告
+        # (Negotiator 阶段落库) 里有 redline, 实时流式消费方会看不到。
+        from app.agent.redline import attach_redlines
+
+        attach_redlines(state.risk_assessments)
         return state
 
     @staticmethod

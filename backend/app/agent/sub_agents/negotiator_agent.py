@@ -13,6 +13,7 @@ import re
 from loguru import logger
 
 from app.agent.base import BaseAgent
+from app.agent.review_enrichment import enrich
 from app.agent.state import AgentState
 from app.mcp.client import MCPClient
 
@@ -27,6 +28,9 @@ class NegotiatorAgent(BaseAgent):
 
     async def run(self, state: AgentState) -> AgentState:
         _extract_obligations(state)
+        # 审查增强层: 要素表 / 缺失条款 / redline。必须在 early return 之前执行,
+        # 否则「零风险合同」会漏掉漏填检测 (恰恰是最容易出问题的场景)。
+        enrich(state)
 
         if not state.risk_assessments:
             logger.info("  无风险条目，跳过谈判策略生成")

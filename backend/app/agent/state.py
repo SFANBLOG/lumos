@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.models.analysis import RiskCategory, RiskLevel
 from app.schemas.analysis import SSEEvent
+from app.schemas.review import ContractFact, MissingClause
 
 
 # ─── 结构化合同条款 ────────────────────────────────────────────
@@ -57,6 +58,10 @@ class RiskAssessment(BaseModel):
     explanation: str = Field(description="大白话解读")
     legal_basis: str = Field(description="法律依据")
     negotiation_tip: str = Field(description="谈判话术建议")
+    suggested_revision: str = Field(
+        default="",
+        description="条款级修改建议 (redline): 这一条应改成什么文本",
+    )
     score: int = Field(ge=0, le=100, description="单项评分 (100=安全)")
 
 
@@ -120,7 +125,23 @@ class AgentState(BaseModel):
     quality_issues: list[str] = Field(default_factory=list, description="待人工复核项")
 
     # ── Node D: 义务提取与谈判话术 ──
+    # 旧字段保留给 SSE / 前端做兼容消费 (日期、金额、义务关键词、自动续约)
     contract_facts: dict = Field(default_factory=dict, description="合同运营要素与义务")
+    # 审查增强层: 结构化要素表、缺失条款、必备条款覆盖率
+    contract_fact_items: list[ContractFact] = Field(
+        default_factory=list,
+        description="合同要素核对表 (带原文定位与置信度)",
+    )
+    missing_clauses: list[MissingClause] = Field(
+        default_factory=list,
+        description="缺失的法定必备条款与应有保护条款",
+    )
+    coverage_score: int = Field(
+        default=100,
+        ge=0,
+        le=100,
+        description="必备条款覆盖率, 与 overall_score / confidence_score 相互独立",
+    )
 
     # ── 流程控制 ──
     current_node: str = Field(default="", description="当前执行的节点名称")
