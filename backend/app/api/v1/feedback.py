@@ -12,12 +12,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlmodel import select
 
 from app.api.deps import DBSession, get_current_user
+from app.models.analysis import RiskItem
 from app.models.review import RiskFeedback
 from app.models.user import User
+from app.services.feedback_insights import build_eval_cases, rule_tuning_suggestions
 from app.schemas.review import (
     RiskFeedbackCreate,
     RiskFeedbackResponse,
@@ -117,4 +119,63 @@ async def feedback_stats(
         ignored=ignored,
         adoption_rate=round(accepted / total, 4) if total else 0.0,
         false_positive_rate=round(false_positive / total, 4) if total else 0.0,
+    )
+
+
+async def _load_feedback_and_risks(session, limit: int):
+    """读取最近的反馈及其对应风险条目 (只查用到的行, 避免全表扫描)."""
+    feedback = list(
+        (
+            await session.execute(
+                select(RiskFeedback)
+                .order_by(RiskFeedback.updated_at.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
+    risk_ids = [row.risk_item_id for row in feedback]
+    risks: list[RiskItem] = []
+    if risk_ids:
+        risks = list(
+            (
+                await session.execute(
+                    select(RiskItem).where(RiskItem.id.in_(risk_ids))
+                )
+            ).scalars().all()
+        )
+    return feedback, risks
+
+
+@router.get(
+    "/eval-cases",
+    summary="导出反馈回流评测集",
+    description="认可的结论导出为可并入 review_golden.json 的正例; 误报原文导出为「期望无风险」反例集。",
+)
+async def eval_cases(
+    session: DBSession,
+    _user: User = Depends(get_current_user),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> dict:
+    feedback, risks = await _load_feedback_and_risks(session, limit)
+    return build_eval_cases(feedback, risks)
+
+
+@router.get(
+    "/tuning-suggestions",
+    summary="按风险类别生成规则调优建议",
+    description="误报率达到阈值时给出 prompt / 规则 / 置信度阈值与回归用例的具体动作。",
+)
+async def tuning_suggestions(
+    session: DBSession,
+    _user: User = Depends(get_current_user),
+    limit: int = Query(default=500, ge=1, le=5000),
+    min_samples: int = Query(default=3, ge=1, le=100),
+    fp_threshold: float = Query(default=0.3, ge=0.0, le=1.0),
+) -> dict:
+    feedback, risks = await _load_feedback_and_risks(session, limit)
+    return rule_tuning_suggestions(
+        feedback,
+        risks,
+        min_samples=min_samples,
+        fp_threshold=fp_threshold,
     )

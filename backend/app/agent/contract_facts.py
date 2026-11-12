@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass
 
 from app.schemas.review import (
+    FACT_CONTRADICTED,
     FACT_MISSING,
     FACT_PRESENT,
     ContractFact,
@@ -221,15 +222,31 @@ def _first_match(text: str, patterns: tuple[str, ...]) -> re.Match[str] | None:
     return None
 
 
-def extract_contract_facts(raw_text: str) -> list[ContractFact]:
+def extract_contract_facts(
+    raw_text: str,
+    contract_type: str = "labor_contract",
+    *,
+    rules: tuple[FactRule, ...] | None = None,
+) -> list[ContractFact]:
     """从合同原文抽取结构化要素表.
 
-    命中即 ``present`` 并保留原文片段作为 evidence; 未命中且为必备条款则
-    标记为 ``missing``, 交由 :func:`detect_missing_clauses` 生成缺口清单。
+    ``contract_type`` 决定使用哪套必备条款规则集 (劳动合同 / 服务合同 / NDA)。
+    命中即 ``present`` 并保留原文片段作为 evidence; 检出但与法定要求冲突的
+    反向约定标为 ``contradicted``; 未命中且为必备条款则标为 ``missing``。
+    置信度按捕获方式、证据长度与全文重现度动态计算, 不再是固定 0.9 / 0.75。
     """
+    # 局部 import 打破 contract_facts ↔ fact_semantics 的模块级循环依赖
+    from app.agent.fact_semantics import (
+        detect_contradiction,
+        dynamic_confidence,
+        refine_facts,
+        rules_for,
+    )
+
     text = raw_text or ""
+    selected = rules if rules is not None else rules_for(contract_type)
     facts: list[ContractFact] = []
-    for rule in FACT_RULES:
+    for rule in selected:
         match = _first_match(text, rule.patterns)
         if match is None:
             facts.append(
@@ -239,6 +256,8 @@ def extract_contract_facts(raw_text: str) -> list[ContractFact]:
                     status=FACT_MISSING,
                     required=rule.required,
                     legal_basis=rule.legal_basis,
+                    matched_by="none",
+                    rule_set=contract_type,
                 )
             )
             continue
@@ -250,43 +269,61 @@ def extract_contract_facts(raw_text: str) -> list[ContractFact]:
                 label=rule.label,
                 value=value[:120],
                 evidence=evidence[:200],
-                confidence=0.9 if match.lastindex else 0.75,
+                confidence=dynamic_confidence(match, evidence, text),
                 status=FACT_PRESENT,
                 required=rule.required,
                 legal_basis=rule.legal_basis,
+                matched_by="capture" if match.lastindex else "keyword",
+                contradiction=detect_contradiction(text, rule.key),
+                rule_set=contract_type,
             )
         )
-    return facts
+    return refine_facts(text, facts, contract_type)
 
 
 def detect_missing_clauses(
     facts: list[ContractFact],
     *,
-    rules: tuple[FactRule, ...] = FACT_RULES,
+    rules: tuple[FactRule, ...] | None = None,
+    contract_type: str = "",
 ) -> list[MissingClause]:
-    """必备条款未检出时生成缺口清单 (确定性, 不依赖 LLM)."""
-    by_key = {rule.key: rule for rule in rules}
+    """必备条款缺失或与法定要求冲突时生成缺口清单 (确定性, 不依赖 LLM)."""
+    from app.agent.fact_semantics import rules_for
+
+    selected = rules if rules is not None else rules_for(
+        contract_type or (facts[0].rule_set if facts else "labor_contract")
+    )
+    by_key = {rule.key: rule for rule in selected}
+    high = {"party_a", "party_b", "salary", "social_insurance"}
     missing: list[MissingClause] = []
     for fact in facts:
-        if not fact.required or fact.status != FACT_MISSING:
+        contradicted = fact.status == FACT_CONTRADICTED
+        if not fact.required or (fact.status != FACT_MISSING and not contradicted):
             continue
         rule = by_key.get(fact.key)
+        reason = rule.reason if rule else "法定必备条款未见约定。"
+        if contradicted:
+            reason = (
+                f"检出反向约定「{fact.contradiction}」，该表述无效且须整条改写。{reason}"
+            )
+        level = "high" if contradicted or fact.key in high else "medium"
+        score = 10 if contradicted else (20 if fact.key in high else 30)
         missing.append(
             MissingClause(
                 key=fact.key,
                 label=fact.label,
-                reason=rule.reason if rule else "法定必备条款未见约定。",
+                reason=reason,
                 legal_basis=fact.legal_basis,
                 suggested_text=rule.suggested_text if rule else "建议补充该项约定。",
-                level="high" if fact.key in {"party_a", "party_b", "salary", "social_insurance"} else "medium",
-                score=20 if fact.key in {"party_a", "party_b", "salary", "social_insurance"} else 30,
+                level=level,
+                score=score,
             )
         )
     return missing
 
 
 def coverage_score(facts: list[ContractFact]) -> int:
-    """必备条款覆盖率 (0-100); 无必备项定义时视为 100."""
+    """必备条款覆盖率 (0-100); contradicted 不计入「已写明」."""
     required = [fact for fact in facts if fact.required]
     if not required:
         return 100

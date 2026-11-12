@@ -48,7 +48,9 @@ def has_session(contract_id: str) -> bool:
     return contract_id in _sessions
 
 
-def start_analysis(contract_id: str, raw_text: str) -> None:
+def start_analysis(
+    contract_id: str, raw_text: str, contract_type: str = ""
+) -> None:
     """启动后台分析任务; 已有会话 (在途或已缓冲) 时不重复执行."""
     if contract_id in _sessions:
         return
@@ -56,7 +58,7 @@ def start_analysis(contract_id: str, raw_text: str) -> None:
     sess = _TaskSession()
     _sessions[contract_id] = sess
     sess.task = asyncio.create_task(
-        _runner(contract_id, raw_text, sess),
+        _runner(contract_id, raw_text, sess, contract_type),
         name=f"analysis:{contract_id}",
     )
     logger.info(f"🚀 后台分析任务已启动 | 合同ID: {contract_id}")
@@ -93,15 +95,23 @@ async def reconcile_orphans() -> None:
             logger.warning(f"🧹 启动对账 | {len(rows)} 条孤儿 analyzing 记录已标记失败")
 
 
-async def _runner(contract_id: str, raw_text: str, sess: _TaskSession) -> None:
+async def _runner(
+    contract_id: str,
+    raw_text: str,
+    sess: _TaskSession,
+    contract_type: str = "",
+) -> None:
     terminal: ContractStatus | None = None
     try:
         async with asyncio.timeout(_TASK_TIMEOUT):
             async with async_session_factory() as session:
+                # 未指定类型时不传新参数, 保持与既有调用方 / 测试桩的签名兼容
+                extra = {"contract_type": contract_type} if contract_type else {}
                 async for event in run_contract_analysis(
                     contract_id=contract_id,
                     raw_text=raw_text,
                     session=session,
+                    **extra,
                 ):
                     if event.event == SSEEventType.COMPLETE:
                         # 先落库再入缓冲: 客户端收到 COMPLETE 后立即查报告不会扑空

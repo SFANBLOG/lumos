@@ -1,0 +1,18 @@
+{
+  "_comment": "示例覆盖文件。复制为 law_meta_overrides.json 或设置 LUMOS_LAW_META_PATH 指向本文件；键为『法名』或『法名@地区』，值只接受 LawMeta 字段。source_url 必须是具体文本页，checked_at 为人工核对日期。示例中的网址是占位符，请勿直接上线使用。",
+  "最低工资规定@上海市": {
+    "region": "上海市",
+    "effective_from": "2004-03-01",
+    "version": "baseline-1.0",
+    "source_url": "https://example.invalid/shanghai-minimum-wage",
+    "checked_at": "2026-11-11",
+    "note": "示例：请替换为上海市人社局公布的最新标准与链接"
+  },
+  "劳动合同法": {
+    "effective_from": "2013-07-01",
+    "version": "2012 修正",
+    "source_url": "https://example.invalid/labor-contract-law-2012",
+    "checked_at": "2026-11-11",
+    "note": "示例：请替换为国家法律法规数据库的具体文本页"
+  }
+}

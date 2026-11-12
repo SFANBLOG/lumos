@@ -268,20 +268,115 @@ def load_predictions(path: Path) -> list[PredictedCase]:
     ]
 
 
+# ─── 发布门禁 ─────────────────────────────────────────────────
+
+_ROOT = Path(__file__).resolve().parent
+DEFAULT_GATE_FILE = _ROOT / "gate_thresholds.json"
+
+#: 未显式提供阈值文件时的保守默认值 (可被 gate_thresholds.json 覆盖)
+DEFAULT_GATE: dict[str, Any] = {
+    "min_precision": 0.6,
+    "min_recall": 0.8,
+    "min_f1": 0.7,
+    "min_level_agreement": 0.6,
+    "max_severe_misses": 0,
+    "min_missing_precision": 0.6,
+    "min_missing_recall": 0.8,
+    "require_complete_predictions": True,
+}
+
+
+def load_thresholds(path: Path) -> dict[str, Any]:
+    """读取阈值文件; 下划线开头的注释键不参与判定."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return {k: v for k, v in payload.items() if not k.startswith("_")}
+
+
+def check_gate(
+    result: dict[str, Any], thresholds: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """按阈值判定是否允许发布, 返回逐项可审计的检查明细.
+
+    严重漏报 (required+high 未检出) 是硬红线, 默认必须为 0。
+    """
+    limits = {**DEFAULT_GATE, **(thresholds or {})}
+    overall = result["overall"]
+    missing_metrics = overall.get("missing_metrics", {})
+    actual = {
+        "precision": overall.get("precision", 0.0),
+        "recall": overall.get("recall", 0.0),
+        "f1": overall.get("f1", 0.0),
+        "level_agreement": overall.get("level_agreement", 0.0),
+        "severe_misses": overall.get("severe_misses", 0),
+        "missing_precision": missing_metrics.get("precision", 0.0),
+        "missing_recall": missing_metrics.get("recall", 0.0),
+        "predicted_cases": result.get("prediction_count", 0),
+        "golden_cases": result.get("golden_count", 0),
+    }
+    specs = (
+        ("precision", "min_precision", ">="),
+        ("recall", "min_recall", ">="),
+        ("f1", "min_f1", ">="),
+        ("level_agreement", "min_level_agreement", ">="),
+        ("severe_misses", "max_severe_misses", "<="),
+        ("missing_precision", "min_missing_precision", ">="),
+        ("missing_recall", "min_missing_recall", ">="),
+    )
+    checks: list[dict[str, Any]] = []
+    for metric, key, op in specs:
+        limit = limits[key]
+        ok = actual[metric] >= limit if op == ">=" else actual[metric] <= limit
+        checks.append(
+            {"metric": metric, "actual": actual[metric], "limit": limit, "op": op, "ok": ok}
+        )
+    if limits.get("require_complete_predictions", True):
+        expected = actual["golden_cases"]
+        checks.append(
+            {
+                "metric": "predicted_cases",
+                "actual": actual["predicted_cases"],
+                "limit": expected,
+                "op": "==",
+                "ok": actual["predicted_cases"] == expected,
+            }
+        )
+    violations = [c for c in checks if not c["ok"]]
+    return {
+        "passed": not violations,
+        "thresholds": limits,
+        "checks": checks,
+        "violations": violations,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="合同级端到端审查效果评测")
-    parser.add_argument("--goldens", required=True, type=Path)
-    parser.add_argument("--predictions", required=True, type=Path)
+    parser.add_argument("--goldens", type=Path, default=_ROOT / "goldens" / "review_golden.json")
+    parser.add_argument("--predictions", type=Path, default=_ROOT / "output" / "review_predictions.json")
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--gate", action="store_true", help="启用发布门禁, 未通过时返回退出码 1")
+    parser.add_argument("--thresholds", type=Path, default=DEFAULT_GATE_FILE)
     args = parser.parse_args(argv)
 
     result = evaluate(load_goldens(args.goldens), load_predictions(args.predictions))
+    if args.gate:
+        result["gate"] = check_gate(result, load_thresholds(args.thresholds))
     text = json.dumps(result, ensure_ascii=False, indent=2)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text + "\n", encoding="utf-8")
         print(f"评测结果已写入 {args.out}")
     print(json.dumps(result["overall"], ensure_ascii=False, indent=2))
+    if args.gate:
+        gate = result["gate"]
+        print(
+            json.dumps(
+                {"gate_passed": gate["passed"], "violations": gate["violations"]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if gate["passed"] else 1
     return 0
 
 

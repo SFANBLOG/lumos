@@ -225,6 +225,7 @@ async def run_contract_analysis(
     contract_id: str,
     raw_text: str,
     session: AsyncSession | None = None,
+    contract_type: str = "",
 ) -> AsyncGenerator[SSEEvent, None]:
     """
     执行 LangGraph 合同分析工作流, 异步生成 SSE 事件流.
@@ -239,7 +240,11 @@ async def run_contract_analysis(
     )
 
     graph = build_contract_graph(mode)
-    initial = AgentState(contract_id=contract_id, raw_text=raw_text)
+    initial = AgentState(
+        contract_id=contract_id,
+        raw_text=raw_text,
+        contract_type=contract_type,
+    )
 
     final_state = initial
     emitted = 0
@@ -297,6 +302,7 @@ async def run_contract_analysis(
             "contract_fact_items": [f.model_dump() for f in final_state.contract_fact_items],
             "missing_clauses": [m.model_dump() for m in final_state.missing_clauses],
             "coverage_score": final_state.coverage_score,
+            "contract_type": final_state.contract_type,
             "agent_mode": mode,
             "agent_trace": final_state.agent_trace,
             "review_rounds": final_state.review_rounds,
@@ -350,6 +356,10 @@ async def _persist(state: AgentState, session: AsyncSession) -> str | None:
                     legal_basis=assessment.legal_basis,
                     negotiation_tip=assessment.negotiation_tip,
                     suggested_revision=assessment.suggested_revision,
+                    revision_reason=assessment.revision_reason,
+                    revision_diff=assessment.revision_diff,
+                    revision_method=assessment.revision_method,
+                    revision_confidence=assessment.revision_confidence,
                     score=assessment.score,
                     order=idx,
                 )
@@ -368,6 +378,9 @@ async def _persist(state: AgentState, session: AsyncSession) -> str | None:
                     status=fact.status,
                     required=fact.required,
                     legal_basis=fact.legal_basis,
+                    matched_by=fact.matched_by,
+                    contradiction=fact.contradiction,
+                    rule_set=fact.rule_set,
                     order=idx,
                 )
             )

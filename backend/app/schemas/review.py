@@ -13,9 +13,11 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 # 合同要素状态取值: present(已写明) / missing(未检出) / unclear(检出但取值不明确)
+# / contradicted(检出但与法定要求冲突, 比缺失更危险)
 FACT_PRESENT = "present"
 FACT_MISSING = "missing"
 FACT_UNCLEAR = "unclear"
+FACT_CONTRADICTED = "contradicted"
 
 
 class ContractFact(BaseModel):
@@ -34,6 +36,9 @@ class ContractFact(BaseModel):
     status: str = Field(default=FACT_MISSING, description="present / missing / unclear")
     required: bool = Field(default=False, description="是否属于法定必备条款")
     legal_basis: str = Field(default="", description="缺失时援引的法条")
+    matched_by: str = Field(default="", description="capture / keyword / negation / none")
+    contradiction: str = Field(default="", description="命中的与法定要求冲突的原文片段")
+    rule_set: str = Field(default="labor_contract", description="使用的必备条款规则集")
 
 
 class MissingClause(BaseModel):
@@ -101,3 +106,61 @@ class ReviewStatsResponse(BaseModel):
     ignored: int = 0
     adoption_rate: float = Field(default=0.0, ge=0, le=1, description="认可率")
     false_positive_rate: float = Field(default=0.0, ge=0, le=1, description="误报率")
+
+
+class ShareCreateRequest(BaseModel):
+    """创建报告分享链接."""
+
+    ttl_hours: int = Field(default=72, ge=1, le=720, description="有效期 (小时)")
+    allow_annotations: bool = Field(default=True, description="是否允许对方在线批注")
+
+
+class ShareResponse(BaseModel):
+    """分享链接创建结果; token 只在这里返回一次."""
+
+    id: str
+    token: str
+    url: str
+    expires_at: datetime
+    allow_annotations: bool
+    revoked: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class ShareListItem(BaseModel):
+    """分享链接管理列表项 (不含 token)."""
+
+    id: str
+    contract_id: str
+    expires_at: datetime
+    created_at: datetime
+    revoked: bool
+    allow_annotations: bool
+    annotation_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class AnnotationCreate(BaseModel):
+    """提交一条在线批注 (分享链接持有者无需登录)."""
+
+    risk_item_id: str = Field(default="", max_length=64)
+    quote: str = Field(default="", max_length=2000, description="引用的原条款片段")
+    comment: str = Field(min_length=1, max_length=2000)
+    author: str = Field(default="匿名", max_length=64)
+
+
+class AnnotationResponse(BaseModel):
+    """在线批注."""
+
+    id: str
+    contract_id: str
+    share_id: str
+    risk_item_id: str = ""
+    quote: str = ""
+    comment: str
+    author: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from app.rag.law_corpus_ext import EXTENDED_RULES
@@ -355,9 +356,12 @@ def _load_full_corpus() -> list[dict]:
     # corpus_hash() 改变, 从而自动触发向量库 / BM25 索引重建。
     from app.rag.law_meta import active_laws, attach_metadata
 
+    # 地区口径由部署环境给出 (如 LUMOS_LAW_REGION=上海市):
+    # 全国性法规始终保留, 地方性法规按 region 字段过滤。
+    region = os.getenv("LUMOS_LAW_REGION", "").strip()
     for law in unique:
-        attach_metadata(law)
-    return active_laws(unique)
+        attach_metadata(law, region=region)
+    return active_laws(unique, region=region)
 
 
 ALL_LAWS: list[dict] = _load_full_corpus()

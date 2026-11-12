@@ -1,0 +1,11 @@
+{
+  "_comment": "发布门禁阈值。python -m eval.review_eval --gate 未通过时退出码为 1，可直接接 CI。检索层 hit@k/MRR 不在本门禁内。",
+  "min_precision": 0.6,
+  "min_recall": 0.8,
+  "min_f1": 0.7,
+  "min_level_agreement": 0.6,
+  "max_severe_misses": 0,
+  "min_missing_precision": 0.6,
+  "min_missing_recall": 0.8,
+  "require_complete_predictions": true
+}

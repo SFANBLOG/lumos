@@ -1,0 +1,76 @@
+[
+  {
+    "contract_id": "eval-001",
+    "group": "single",
+    "contract_type": "labor_contract",
+    "risks": [
+      {
+        "category": "non_compete",
+        "level": "high",
+        "clause_snippet": "甲方每月支付竞业补偿 500 元",
+        "required": true
+      }
+    ],
+    "missing_clauses": []
+  },
+  {
+    "contract_id": "eval-002",
+    "group": "single",
+    "contract_type": "labor_contract",
+    "risks": [
+      {
+        "category": "probation_salary",
+        "level": "high",
+        "clause_snippet": "试用期工资为约定工资的 60%",
+        "required": true
+      }
+    ],
+    "missing_clauses": []
+  },
+  {
+    "contract_id": "eval-003",
+    "group": "mixed",
+    "contract_type": "labor_contract",
+    "risks": [
+      {
+        "category": "probation_insurance",
+        "level": "high",
+        "clause_snippet": "乙方自愿放弃社保，甲方以补贴代替",
+        "required": true
+      },
+      {
+        "category": "leave_rights",
+        "level": "high",
+        "clause_snippet": "乙方自愿放弃加班费",
+        "required": true
+      },
+      {
+        "category": "resignation",
+        "level": "high",
+        "clause_snippet": "乙方离职需经甲方批准，未经批准不得离职",
+        "required": true
+      }
+    ],
+    "missing_clauses": [
+      "work_hours",
+      "social_insurance",
+      "termination"
+    ]
+  },
+  {
+    "contract_id": "eval-004",
+    "group": "single",
+    "contract_type": "labor_contract",
+    "risks": [],
+    "missing_clauses": []
+  },
+  {
+    "contract_id": "eval-005",
+    "group": "single",
+    "contract_type": "service_contract",
+    "risks": [],
+    "missing_clauses": [
+      "liability"
+    ]
+  }
+]

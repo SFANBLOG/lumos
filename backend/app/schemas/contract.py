@@ -43,6 +43,14 @@ class ContractCreateRequest(BaseModel):
         default=False,
         description="内容判定为「非合同」时是否仍然继续分析 (前端二次确认后传 true)",
     )
+    contract_type: str = Field(
+        default="auto",
+        max_length=32,
+        description=(
+            "合同类型与必备条款规则集: auto / labor_contract / service_contract / nda; "
+            "auto 表示按原文推断"
+        ),
+    )
 
 
 # ─── 响应 ──────────────────────────────────────────────────────

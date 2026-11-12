@@ -220,7 +220,9 @@ async def submit_contract(
     # 先提交落库, 再启动后台任务 (任务使用独立会话, 必须能读到该记录)
     await session.commit()
 
-    analysis_task.start_analysis(contract.id, request.text)
+    analysis_task.start_analysis(
+        contract.id, request.text, contract_type=request.contract_type
+    )
 
     logger.info(f"✅ 合同记录已创建 | ID: {contract.id}")
 
@@ -380,6 +382,10 @@ async def get_report(
                 negotiation_tip=item.negotiation_tip,
                 # 旧库通过 ALTER 补的列允许 NULL, 统一兜底成空串
                 suggested_revision=item.suggested_revision or "",
+                revision_reason=item.revision_reason or "",
+                revision_diff=item.revision_diff or "",
+                revision_method=item.revision_method or "",
+                revision_confidence=item.revision_confidence or 0.0,
                 score=item.score,
             )
             for item in risk_items

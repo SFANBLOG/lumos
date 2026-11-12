@@ -147,20 +147,22 @@ import { reviewApi, type FeedbackVerdict } from '@/api/review'
 import { DEMO_CONTRACTS, DEMO_CONTRACT_TEXT } from '@/mock/demo'
 import { categoryLabel } from '@/utils/contractMeta'
 import { levelMeta } from '@/utils/contractDisplay'
+import { isDemoMode } from '@/utils/demoMode'
 
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
 const isDemo = ref(false)
-const contractName = ref('网站开发技术服务合同')
-const contractCode = ref('CT-20260910-018')
-const pageCount = ref(18)
-const charCount = ref(6840)
+// 非演示模式不预置任何示例合同的标题/编号/页数，避免与真实数据串味
+const contractName = ref(isDemoMode ? '网站开发技术服务合同' : '')
+const contractCode = ref(isDemoMode ? 'CT-20260910-018' : '')
+const pageCount = ref(0)
+const charCount = ref(0)
 const contractText = ref(DEMO_CONTRACT_TEXT)
 const risks = ref<RiskItemData[]>([])
 const reportSummary = ref('')
-const riskScore = ref(90)
+const riskScore = ref(0)
 const activeTab = ref<'all' | 'high' | 'medium' | 'low'>('all')
 const viewerRef = ref<InstanceType<typeof DocViewer> | null>(null)
 
@@ -178,7 +180,8 @@ const feedbackKey = (risk: RiskItemData) => risk.id || risk.title
 
 const fileName = computed(() => `${contractName.value.replace(/[\\/:*?"<>|]/g, '')}.docx`)
 
-const DEMO_RISKS: RiskItemData[] = [
+const DEMO_RISKS: RiskItemData[] = isDemoMode
+  ? [
   {
     category: 'non_compete',
     level: 'medium',
@@ -224,7 +227,7 @@ const DEMO_RISKS: RiskItemData[] = [
     negotiation_tip: '建议增加「乙方应在删除完成后 5 个工作日内出具书面删除证明」。',
     score: 36,
   },
-]
+] : []
 
 const highlightKeywords = computed(() =>
   risks.value
@@ -276,8 +279,15 @@ const loadContract = async () => {
   }
   if (queryName) contractName.value = queryName
   if (!id) {
-    isDemo.value = true
-    risks.value = DEMO_RISKS
+    // 非演示模式下没有合同 ID 就是空态，不再回落到示例风险列表
+    if (isDemoMode) {
+      isDemo.value = true
+      risks.value = DEMO_RISKS
+    } else {
+      isDemo.value = false
+      risks.value = []
+      contractText.value = ''
+    }
     return
   }
 
@@ -312,8 +322,14 @@ const loadContract = async () => {
       ElMessage.info('该合同尚未生成审查报告，可先查看原始文档')
     }
   } catch {
-    isDemo.value = true
-    risks.value = DEMO_RISKS
+    // 接口失败时不能拿示例结论冒充真实审查结果
+    if (isDemoMode) {
+      isDemo.value = true
+      risks.value = DEMO_RISKS
+    } else {
+      risks.value = []
+      ElMessage.error('报告加载失败，请稍后重试')
+    }
   } finally {
     loading.value = false
   }

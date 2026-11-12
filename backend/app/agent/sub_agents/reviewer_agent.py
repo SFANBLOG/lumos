@@ -41,7 +41,9 @@ jurisdiction, training_bond
 
 ## 输出格式:
 请严格以 JSON 对象的形式输出，包含:
-- risks: 风险条目数组，每个元素包含: category, level, title, original_clause, explanation, legal_basis, score
+- risks: 风险条目数组，每个元素包含: category, level, title, original_clause, explanation, legal_basis, score,
+  revised_clause (把 original_clause 逐条改写成合法表述的**完整条款文本**，不要只写「建议如何如何」),
+  rewrite_reason (说明这一条具体为什么这么改，不要泛泛而谈)
 - overall_score: 整体评分 (0-100, 整数)
 - overall_level: 整体风险等级 (high/medium/low/safe)
 - summary: 一句话总结
@@ -155,6 +157,10 @@ class ReviewerAgent(BaseAgent):
                             explanation=item["explanation"],
                             legal_basis=item.get("legal_basis", ""),
                             negotiation_tip=item.get("negotiation_tip", ""),
+                            # redline v2: 保留 LLM 的逐条改写, 由 redline_engine
+                            # 做合法性校验后采用; 不合法时按本条原文规则兜底。
+                            llm_revised_clause=str(item.get("revised_clause", "") or ""),
+                            llm_rewrite_reason=str(item.get("rewrite_reason", "") or ""),
                             score=int(item.get("score", 50)),
                         )
                     )
@@ -179,11 +185,11 @@ class ReviewerAgent(BaseAgent):
             self._fallback(state)
 
         self._apply_quality_gate(state)
-        # 让 SSE 的 RISK_FOUND 事件也带上条款级修改建议; 否则只有最终报告
-        # (Negotiator 阶段落库) 里有 redline, 实时流式消费方会看不到。
-        from app.agent.redline import attach_redlines
+        # 让 SSE 的 RISK_FOUND 事件也带上逐条改写; review_enrichment 会按
+        # revision_method 幂等跳过, 因此两处调用不会产生重复改写。
+        from app.agent.redline_engine import attach_rewrites
 
-        attach_redlines(state.risk_assessments)
+        attach_rewrites(state.risk_assessments)
         return state
 
     @staticmethod

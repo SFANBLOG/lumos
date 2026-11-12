@@ -62,6 +62,13 @@ class RiskAssessment(BaseModel):
         default="",
         description="条款级修改建议 (redline): 这一条应改成什么文本",
     )
+    # redline v2: LLM 逐条改写 (由 Reviewer 解析) 与最终可审计的改写结果
+    llm_revised_clause: str = Field(default="", description="LLM 给出的逐条改写文本")
+    llm_rewrite_reason: str = Field(default="", description="LLM 给出的改写理由")
+    revision_reason: str = Field(default="", description="最终采用的改写理由")
+    revision_diff: str = Field(default="", description="原条款 → 建议条款的 unified diff")
+    revision_method: str = Field(default="", description="llm / rule, 标记改写来源")
+    revision_confidence: float = Field(default=0.0, ge=0, le=1)
     score: int = Field(ge=0, le=100, description="单项评分 (100=安全)")
 
 
@@ -96,6 +103,10 @@ class AgentState(BaseModel):
     # ── 输入 ──
     contract_id: str = Field(description="合同 ID")
     raw_text: str = Field(description="脱敏后的合同原文")
+    contract_type: str = Field(
+        default="",
+        description="合同类型: labor_contract / service_contract / nda; 空或 auto 时按原文推断",
+    )
 
     # ── Node A: 结构化提取 ──
     corrected_text: str = Field(default="", description="纠错后的文本")

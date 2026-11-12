@@ -60,6 +60,10 @@ class RiskItemResponse(BaseModel):
         default="",
         description="条款级修改建议 (redline): 这一条应改成什么文本",
     )
+    revision_reason: str = Field(default="", description="改写理由")
+    revision_diff: str = Field(default="", description="原条款 → 建议条款的 unified diff")
+    revision_method: str = Field(default="", description="llm / rule")
+    revision_confidence: float = Field(default=0.0, ge=0, le=1)
     score: int = Field(ge=0, le=100, description="单项评分")
 
     model_config = {"from_attributes": True}

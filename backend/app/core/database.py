@@ -104,19 +104,36 @@ async def init_db() -> None:
                     await conn.execute(
                         text(f"ALTER TABLE contracts ADD COLUMN {column} {ddl}")
                     )
-            # 审查增强层: risk_items 新增条款级修改建议 (redline) 列。
-            # 允许 NULL 是为了兼容已有行, 读取侧统一用 ``or ""`` 兜底。
-            exists = await conn.execute(
-                text(
-                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'risk_items' "
-                    "AND COLUMN_NAME = 'suggested_revision'"
-                )
-            )
-            if exists.scalar_one() == 0:
-                await conn.execute(
-                    text("ALTER TABLE risk_items ADD COLUMN suggested_revision MEDIUMTEXT NULL")
-                )
+            # 审查增强层: risk_items 的逐条改写列 (允许 NULL, 读取侧兜底),
+            # 以及要素表的语义级检测列 (带默认值, 历史行直接回填)。
+            column_additions = {
+                "risk_items": {
+                    "suggested_revision": "MEDIUMTEXT NULL",
+                    "revision_reason": "MEDIUMTEXT NULL",
+                    "revision_diff": "MEDIUMTEXT NULL",
+                    "revision_method": "VARCHAR(16) NULL",
+                    "revision_confidence": "FLOAT NOT NULL DEFAULT 0",
+                },
+                "contract_fact_items": {
+                    "matched_by": "VARCHAR(16) NOT NULL DEFAULT ''",
+                    "contradiction": "VARCHAR(255) NOT NULL DEFAULT ''",
+                    "rule_set": "VARCHAR(32) NOT NULL DEFAULT 'labor_contract'",
+                },
+            }
+            for table, columns in column_additions.items():
+                for column, ddl in columns.items():
+                    exists = await conn.execute(
+                        text(
+                            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table "
+                            "AND COLUMN_NAME = :col"
+                        ),
+                        {"table": table, "col": column},
+                    )
+                    if exists.scalar_one() == 0:
+                        await conn.execute(
+                            text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                        )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

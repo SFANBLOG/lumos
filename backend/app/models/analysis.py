@@ -130,6 +130,18 @@ class RiskItem(SQLModel, table=True):
         sa_column=Column("suggested_revision", MEDIUM_TEXT, nullable=True),
         description="条款级修改建议: 这一条应改成什么文本",
     )
+    revision_reason: str | None = Field(
+        default=None,
+        sa_column=Column("revision_reason", MEDIUM_TEXT, nullable=True),
+        description="改写理由",
+    )
+    revision_diff: str | None = Field(
+        default=None,
+        sa_column=Column("revision_diff", MEDIUM_TEXT, nullable=True),
+        description="原条款 → 建议条款的 unified diff",
+    )
+    revision_method: str | None = Field(default=None, max_length=16, description="llm / rule")
+    revision_confidence: float = Field(default=0.0, description="改写置信度")
     score: int = Field(default=0, ge=0, le=100, description="单项评分")
 
     # ---- 排序 ----
