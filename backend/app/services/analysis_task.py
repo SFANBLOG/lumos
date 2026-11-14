@@ -6,7 +6,8 @@
 - 提交合同后立即以后台 asyncio 任务运行, 使用独立数据库会话;
 - 事件按序缓存在进程内存, SSE 端点只做「回放 + 跟随推送」,
   客户端断线/离开页面不再中断分析, 重连可看到完整进度;
-- 进程重启丢失的在途任务由启动对账 (reconcile_orphans) 标记失败;
+- 进程重启丢失的在途任务由启动对账 (reconcile_orphans) 处理: 有可续跑的
+  LangGraph 检查点就从断点恢复, 没有则标记失败 (memory 后端重启后即无快照);
 - 事件缓冲为进程内状态, 要求 uvicorn 单 worker 运行
   (deploy/supervisord.conf --workers 1), 多 worker 需改外置队列。
 """
@@ -19,13 +20,21 @@ from datetime import UTC, datetime
 
 from loguru import logger
 
-from app.agent.graph import run_contract_analysis
+from app.agent.graph import (
+    get_checkpoint_state,
+    resume_contract_analysis,
+    run_contract_analysis,
+)
+from app.agent.memory import prune_expired_checkpoints
 from app.core.database import async_session_factory
 from app.models.contract import Contract, ContractStatus
 from app.schemas.analysis import SSEEvent, SSEEventType
 
 #: 已结束的会话缓冲最多保留多少个 (超出按插入顺序淘汰)
 _MAX_KEPT_SESSIONS = 50
+
+#: 单个任务最多缓冲多少条进度事件 (超出后只保留终态事件, 防内存无界增长)
+_MAX_BUFFERED_EVENTS = 500
 
 #: 无终态事件时等待分析的兜底超时 (秒), 防 LLM 挂死导致任务永动
 _TASK_TIMEOUT = 900.0
@@ -49,19 +58,50 @@ def has_session(contract_id: str) -> bool:
 
 
 def start_analysis(
-    contract_id: str, raw_text: str, contract_type: str = ""
+    contract_id: str, raw_text: str, contract_type: str = "", *, resume: bool = False
 ) -> None:
-    """启动后台分析任务; 已有会话 (在途或已缓冲) 时不重复执行."""
+    """启动后台分析任务; 已有会话 (在途或已缓冲) 时不重复执行.
+
+    ``resume=True`` 时忽略 raw_text, 改从同 contract_id 的检查点续跑。
+    """
     if contract_id in _sessions:
         return
     _prune()
     sess = _TaskSession()
     _sessions[contract_id] = sess
     sess.task = asyncio.create_task(
-        _runner(contract_id, raw_text, sess, contract_type),
+        _runner(contract_id, raw_text, sess, contract_type, resume=resume),
         name=f"analysis:{contract_id}",
     )
-    logger.info(f"🚀 后台分析任务已启动 | 合同ID: {contract_id}")
+    logger.info(
+        f"🚀 后台分析任务已启动 | 合同ID: {contract_id} | 续跑: {resume}"
+    )
+
+
+def start_resume(contract_id: str) -> None:
+    """从检查点续跑孤儿任务 (CHECKPOINT_BACKEND=sqlite 时跨进程重启有效)."""
+    start_analysis(contract_id, "", resume=True)
+
+
+def resume_analysis(contract_id: str) -> bool:
+    """人工复核通过后从检查点续跑, 复用已有 SSE 会话缓冲 (保留历史进度).
+
+    Returns:
+        是否成功启动续跑任务; 任务在途时返回 False, 避免重复执行。
+    """
+    sess = _sessions.get(contract_id)
+    if sess is None:
+        start_resume(contract_id)
+        return True
+    if not sess.done:
+        return False
+    sess.done = False
+    sess.task = asyncio.create_task(
+        _runner(contract_id, "", sess, resume=True),
+        name=f"analysis-resume:{contract_id}",
+    )
+    logger.info(f"▶️ 人工复核通过, 从检查点续跑 | 合同ID: {contract_id}")
+    return True
 
 
 async def stream_events(contract_id: str) -> AsyncGenerator[SSEEvent, None]:
@@ -80,19 +120,33 @@ async def stream_events(contract_id: str) -> AsyncGenerator[SSEEvent, None]:
 
 
 async def reconcile_orphans() -> None:
-    """启动对账: 进程重启后内存任务已失, 孤儿 analyzing 记录标记失败."""
+    """启动对账: 有未完成检查点的孤儿任务从断点续跑, 其余标记失败."""
+    resumable: list[str] = []
     async with async_session_factory() as session:
         from sqlmodel import select
 
         stmt = select(Contract).where(Contract.status == ContractStatus.ANALYZING)
         rows = (await session.execute(stmt)).scalars().all()
         for contract in rows:
+            try:
+                state = await get_checkpoint_state(contract.id)
+            except Exception:  # noqa: BLE001
+                logger.exception(f"检查点查询失败 | 合同ID: {contract.id}")
+                state = None
+            if state and (state["next"] or state["pending_review"]):
+                resumable.append(contract.id)
+                continue
             contract.status = ContractStatus.FAILED
             contract.updated_at = datetime.now(UTC)
             session.add(contract)
         if rows:
             await session.commit()
-            logger.warning(f"🧹 启动对账 | {len(rows)} 条孤儿 analyzing 记录已标记失败")
+            logger.warning(
+                f"🧹 启动对账 | 续跑 {len(resumable)} 条, "
+                f"标记失败 {len(rows) - len(resumable)} 条孤儿 analyzing 记录"
+            )
+    for contract_id in resumable:
+        start_resume(contract_id)
 
 
 async def _runner(
@@ -100,19 +154,35 @@ async def _runner(
     raw_text: str,
     sess: _TaskSession,
     contract_type: str = "",
+    *,
+    resume: bool = False,
 ) -> None:
     terminal: ContractStatus | None = None
     try:
         async with asyncio.timeout(_TASK_TIMEOUT):
             async with async_session_factory() as session:
-                # 未指定类型时不传新参数, 保持与既有调用方 / 测试桩的签名兼容
-                extra = {"contract_type": contract_type} if contract_type else {}
-                async for event in run_contract_analysis(
-                    contract_id=contract_id,
-                    raw_text=raw_text,
-                    session=session,
-                    **extra,
-                ):
+                if resume:
+                    stream = resume_contract_analysis(
+                        contract_id=contract_id, session=session
+                    )
+                else:
+                    # 未指定类型时不传新参数, 保持与既有调用方 / 测试桩的签名兼容
+                    extra = {"contract_type": contract_type} if contract_type else {}
+                    stream = run_contract_analysis(
+                        contract_id=contract_id,
+                        raw_text=raw_text,
+                        session=session,
+                        **extra,
+                    )
+                terminal_events = frozenset(
+                    {
+                        SSEEventType.SUMMARY,
+                        SSEEventType.COMPLETE,
+                        SSEEventType.ERROR,
+                        SSEEventType.AWAITING_REVIEW,
+                    }
+                )
+                async for event in stream:
                     if event.event == SSEEventType.COMPLETE:
                         # 先落库再入缓冲: 客户端收到 COMPLETE 后立即查报告不会扑空
                         await _set_status(session, contract_id, ContractStatus.COMPLETED)
@@ -120,7 +190,13 @@ async def _runner(
                     elif event.event == SSEEventType.ERROR:
                         await _set_status(session, contract_id, ContractStatus.FAILED)
                         terminal = ContractStatus.FAILED
-                    sess.events.append(event)
+                    # 进度事件超出窗口后不再入缓冲, 但终态事件必须保留,
+                    # 否则客户端拿不到 SUMMARY / COMPLETE / ERROR。
+                    if (
+                        len(sess.events) < _MAX_BUFFERED_EVENTS
+                        or event.event in terminal_events
+                    ):
+                        sess.events.append(event)
     except TimeoutError:
         logger.error(f"⏰ 后台分析任务超时 ({_TASK_TIMEOUT:.0f}s) | 合同ID: {contract_id}")
         sess.events.append(
@@ -139,6 +215,11 @@ async def _runner(
             except Exception:
                 logger.exception(f"后台分析任务失败状态落库异常 | 合同ID: {contract_id}")
         sess.done = True
+        # 短期记忆治理: 按 TTL / 容量清理检查点 (内部有 10 分钟节流)
+        try:
+            await prune_expired_checkpoints()
+        except Exception:  # noqa: BLE001
+            logger.exception("检查点清理失败 (不影响本次结果)")
 
 
 async def _set_status(session, contract_id: str, new_status: ContractStatus) -> None:

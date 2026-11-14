@@ -5,6 +5,7 @@
 - POST /contracts: 提交合同 → 启动 Agent 分析
 - GET  /contracts/{id}/stream: SSE 流式接收分析过程
 - GET  /contracts/{id}/report: 获取完整分析报告
+- POST /contracts/{id}/resume: 人工复核通过后从检查点续跑
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from loguru import logger
 from sqlalchemy import func
 from sqlmodel import select
 
+from app.agent.graph import get_checkpoint_state
 from app.api.deps import AuthAny, DBSession
 from app.models.analysis import AnalysisResult, RiskItem, RiskLevel
 from app.models.contract import Contract, ContractStatus
@@ -25,7 +27,7 @@ from app.models.review import ContractFactItem, MissingClauseItem
 from app.services import analysis_task
 from app.services.audit import record_audit_event
 from app.services.contract_guard import check_document
-from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse
+from app.schemas.analysis import AnalysisReportResponse, RiskItemResponse, SSEEventType
 from app.schemas.review import ContractFactResponse, MissingClauseResponse
 from app.schemas.contract import (
     ContractCreateRequest,
@@ -234,6 +236,47 @@ async def submit_contract(
     )
 
 
+# ─── POST /contracts/{id}/resume (人工复核通过后续跑) ──────────
+
+
+@router.post(
+    "/{contract_id}/resume",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="人工复核通过后从检查点续跑",
+    description=(
+        "CHECKPOINT_REVIEW_GATE 开启时, 高风险合同会挂起在复核门;"
+        "复核通过后以同一 thread_id 从检查点继续, SSE 重连可看到完整进度。"
+    ),
+)
+async def resume_contract(
+    contract_id: str,
+    session: DBSession,
+    _auth: AuthAny,
+) -> dict:
+    """人工复核通过 → 从 LangGraph 检查点续跑."""
+    if await session.get(Contract, contract_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"合同 {contract_id} 不存在",
+        )
+    state = await get_checkpoint_state(contract_id)
+    if state is None or not state["pending_review"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该合同没有待复核的检查点, 无需续跑",
+        )
+    if not analysis_task.resume_analysis(contract_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="分析任务仍在运行, 请稍后重试",
+        )
+    return {
+        "contract_id": contract_id,
+        "status": "resuming",
+        "checkpoint_id": state["checkpoint_id"],
+    }
+
+
 # ─── GET /contracts/{id}/stream (SSE) ──────────────────────────
 
 
@@ -262,9 +305,24 @@ async def stream_analysis(
     async def event_generator():
         """生成 SSE 事件流."""
         if not analysis_task.has_session(contract_id):
-            # 无内存会话 (进程重启 / 缓冲已淘汰): 按 DB 状态补救
+            # 无内存会话 (进程重启 / 缓冲已淘汰): 先看检查点, 避免重复分析
+            try:
+                checkpoint = await get_checkpoint_state(contract_id)
+            except Exception:  # noqa: BLE001
+                logger.exception(f"检查点查询失败 | 合同ID: {contract_id}")
+                checkpoint = None
             if status_now == ContractStatus.ANALYZING:
-                analysis_task.start_analysis(contract_id, raw_text)
+                if checkpoint and checkpoint["pending_review"]:
+                    data = json.dumps(
+                        {"message": "该合同正在等待人工复核, 复核通过后自动续跑"},
+                        ensure_ascii=False,
+                    )
+                    yield f"event: {SSEEventType.AWAITING_REVIEW.value}\ndata: {data}\n\n"
+                    return
+                if checkpoint and checkpoint["next"]:
+                    analysis_task.start_resume(contract_id)
+                else:
+                    analysis_task.start_analysis(contract_id, raw_text)
             elif status_now == ContractStatus.COMPLETED:
                 data = json.dumps({"message": "✨ 该合同已完成分析"}, ensure_ascii=False)
                 yield f"event: complete\ndata: {data}\n\n"

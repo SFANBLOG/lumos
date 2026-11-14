@@ -62,6 +62,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:  # noqa: BLE001
         logger.error(f"❌ 数据库初始化失败 (关系型功能将不可用, 请检查 DATABASE_URL/MySQL): {e}")
 
+    # 短期记忆治理: 先清理过期 / 超量检查点, 再对账孤儿任务
+    try:
+        from app.agent.memory import prune_expired_checkpoints
+
+        await prune_expired_checkpoints(force=True)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"检查点清理失败: {e}")
+
     # 对账上代进程遗留的 analyzing 孤儿记录 (内存任务随进程重启丢失)
     try:
         from app.services.analysis_task import reconcile_orphans

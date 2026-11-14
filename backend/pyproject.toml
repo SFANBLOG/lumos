@@ -18,6 +18,8 @@ dependencies = [
     # ---- AI / Agent ----
     "langchain-openai>=0.3.0",
     "langgraph>=0.2.60",  # 合同审查工作流 StateGraph 编排
+    "langgraph-checkpoint-sqlite>=3.0.0",  # 可选检查点后端: CHECKPOINT_BACKEND=sqlite
+    "aiosqlite>=0.20.0",  # AsyncSqliteSaver 所需的异步 SQLite 驱动
 
     # ---- RAG & Document ----
     "pymilvus>=2.4.0",

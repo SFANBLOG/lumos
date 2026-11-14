@@ -156,6 +156,28 @@ class Settings(BaseSettings):
     # A2A JSON-RPC 端点路径 (Agent Card 的 url 据此拼接)。
     a2a_base_path: str = "/a2a"
 
+    # ── LangGraph 状态归并 / 检查点 ────────────────────────────
+    # off=不启用 | memory=进程内(默认) | sqlite=本地文件, 跨进程重启可续跑
+    checkpoint_backend: str = "memory"
+    # sqlite 文件路径; 留空 = backend/var/checkpoints.sqlite
+    checkpoint_sqlite_path: str = ""
+    # 高风险结论在生成报告前挂起, 人工复核通过后续跑 (需先启用检查点)
+    checkpoint_review_gate: bool = False
+
+    # ── Agent 记忆管理 ─────────────────────────────────────────
+    memory_enabled: bool = True  # 长期记忆 (经验 / 反馈召回) 总开关
+    # 工作记忆: 单次任务内各追加字段的保留上限 (超限只留最近 N 条)
+    memory_max_events: int = 200
+    memory_max_messages: int = 200
+    memory_max_trace: int = 100
+    memory_max_errors: int = 50
+    # 长期记忆: 有效期 (小时) 与每个命名空间最多保留条数
+    memory_ttl_hours: float = 24.0
+    memory_max_items_per_namespace: int = 50
+    # 短期记忆: 检查点保留时长 (小时) 与最多保留的 thread 数
+    memory_checkpoint_ttl_hours: float = 72.0
+    memory_max_threads: int = 500
+
     # ── 日志 ──────────────────────────────────────────────────
     log_level: str = "DEBUG"
 

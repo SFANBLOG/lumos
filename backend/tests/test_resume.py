@@ -19,12 +19,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-# 遗留失效用例: 生产 graph.py 已改为 multi/linear 双拓扑, 不再有
-# interrupt() / checkpointer / review_gate / resume_contract_analysis。
-# 人工复核改走 api/v1/approvals.py 的独立审批队列 (ApprovalTask)。
-# 保留文件仅作历史设计记录, 显式跳过以免收集阶段 ImportError 干扰测试结果。
+# 遗留失效用例: 检查点与 interrupt 续跑已在 app/agent/checkpoint.py 与
+# app/agent/graph.py 中重新实现, 有效用例见 tests/test_checkpoint.py。
+# 本文件保留为旧版设计记录 (旧断言基于已废弃的 review_gate 行为), 显式跳过,
+# 以免收集阶段 ImportError / 过时断言干扰测试结果。
 pytest.skip(
-    "遗留失效用例: 当前实现无 LangGraph interrupt/checkpoint 续跑, 人工复核走独立审批队列",
+    "旧版设计记录: 检查点/续跑已重新实现, 有效用例见 tests/test_checkpoint.py",
     allow_module_level=True,
 )
 

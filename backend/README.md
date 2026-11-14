@@ -151,5 +151,12 @@ python -m eval.retrieval_eval --topk 5
 | `DATABASE_URL` | mysql+aiomysql://... | SQLAlchemy 连接串（**不再支持 SQLite**，Docker 由 compose 注入） |
 | `DATABASE_ECHO` | `false` | 回显执行 SQL（调试用，默认关闭） |
 | `API_SECRET_KEY` | 空（鉴权关闭） | 非空时启用 X-API-Key 鉴权 |
+| `CHECKPOINT_BACKEND` | `memory` | LangGraph 检查点后端：`off` \| `memory`（进程内） \| `sqlite`（落盘，可跨重启续跑） |
+| `CHECKPOINT_SQLITE_PATH` | 空 | sqlite 文件路径，留空为 `backend/var/checkpoints.sqlite` |
+| `CHECKPOINT_REVIEW_GATE` | `false` | 高风险结论在出报告前 `interrupt` 挂起，人工复核通过后续跑（需先启用检查点） |
+| `MEMORY_ENABLED` | `true` | Agent 长期记忆（审查经验 / 误报反馈召回）总开关 |
+| `MEMORY_MAX_EVENTS` / `MEMORY_MAX_MESSAGES` | `200` / `200` | 工作记忆窗口上限，超限只留最近 N 条；SSE 回放依赖 `event_count` 游标，不丢帧 |
+| `MEMORY_TTL_HOURS` / `MEMORY_CHECKPOINT_TTL_HOURS` | `24` / `72` | 长期记忆与检查点快照的有效期（小时） |
+| `MEMORY_MAX_THREADS` | `500` | 检查点最多保留的 thread 数，超出按最旧淘汰 |
 
 完整清单见 `backend/.env.example` 与 `app/core/config.py`。

@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from app.agent.base import BaseAgent
+from app.agent.checkpoint import graph_config
 from app.agent.graph import build_contract_graph, run_contract_analysis
 from app.agent.state import AgentState
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
@@ -137,7 +138,10 @@ class TestAgentCollaboration:
     def test_agents_communicate_via_message_bus(self, fake_llm, fake_mcp) -> None:
         graph = build_contract_graph("multi")
         raw = asyncio.run(
-            graph.ainvoke(AgentState(contract_id="ma-1", raw_text=_CONTRACT_TEXT))
+            graph.ainvoke(
+                AgentState(contract_id="ma-1", raw_text=_CONTRACT_TEXT),
+                config=graph_config("ma-1"),
+            )
         )
         st = raw if isinstance(raw, AgentState) else AgentState(**raw)
 
@@ -158,7 +162,10 @@ class TestAgentCollaboration:
     def test_verifier_vetoes_and_triggers_one_rework(self, fake_llm_bad, fake_mcp) -> None:
         graph = build_contract_graph("multi")
         raw = asyncio.run(
-            graph.ainvoke(AgentState(contract_id="ma-2", raw_text=_CONTRACT_TEXT))
+            graph.ainvoke(
+                AgentState(contract_id="ma-2", raw_text=_CONTRACT_TEXT),
+                config=graph_config("ma-2"),
+            )
         )
         st = raw if isinstance(raw, AgentState) else AgentState(**raw)
 
@@ -172,7 +179,10 @@ class TestAgentCollaboration:
     def test_short_text_skips_verifier_by_coordinator_decision(self, fake_llm, fake_mcp) -> None:
         graph = build_contract_graph("multi")
         raw = asyncio.run(
-            graph.ainvoke(AgentState(contract_id="ma-3", raw_text="甲方与乙方签订劳动合同。"))
+            graph.ainvoke(
+                AgentState(contract_id="ma-3", raw_text="甲方与乙方签订劳动合同。"),
+                config=graph_config("ma-3"),
+            )
         )
         st = raw if isinstance(raw, AgentState) else AgentState(**raw)
         assert "verifier" not in st.agent_plan

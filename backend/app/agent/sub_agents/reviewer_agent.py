@@ -194,7 +194,13 @@ class ReviewerAgent(BaseAgent):
 
     @staticmethod
     def _build_context(state: AgentState) -> str:
-        parts = [render_playbook(), "\n## 合同条款:\n"]
+        parts = [render_playbook()]
+        # 长期记忆召回: 仅作为统计性参考, 明确要求仍以法条核验为准,
+        # 避免把历史误报统计变成新的偏见来源。
+        if state.memory_hints:
+            parts.append("\n## 历史审查记忆 (仅供参考, 不替代法条核验):\n")
+            parts.extend(f"- {hint}\n" for hint in state.memory_hints[:5])
+        parts.append("\n## 合同条款:\n")
         for clause in state.extracted_clauses:
             cat = f" [{clause.category.value}]" if clause.category else ""
             parts.append(f"### 第 {clause.clause_index} 条{cat}: {clause.title}\n{clause.content}\n")

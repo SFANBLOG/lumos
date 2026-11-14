@@ -29,6 +29,9 @@ class SSEEventType(str, Enum):
     # 风险结果 (逐条推送)
     RISK_FOUND = "risk_found"  # 发现一条风险
 
+    # 人工复核门: 检查点挂起, 等待复核通过后续跑
+    AWAITING_REVIEW = "awaiting_review"
+
     # 最终结果
     SUMMARY = "summary"  # 分析总结
     COMPLETE = "complete"  # 全部完成

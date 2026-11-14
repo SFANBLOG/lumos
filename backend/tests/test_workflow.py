@@ -15,6 +15,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from app.agent.base import BaseAgent
+from app.agent.checkpoint import graph_config
 from app.agent.graph import build_contract_graph, run_contract_analysis
 from app.agent.state import AgentState
 from app.agent.sub_agents.reviewer_agent import ReviewerAgent
@@ -138,7 +139,10 @@ class TestWorkflowGraph:
 
         graph = build_contract_graph("linear")
         raw = asyncio.run(
-            graph.ainvoke(AgentState(contract_id="g-1", raw_text=_CONTRACT_TEXT))
+            graph.ainvoke(
+                AgentState(contract_id="g-1", raw_text=_CONTRACT_TEXT),
+                config=graph_config("g-1"),
+            )
         )
         st = raw if isinstance(raw, AgentState) else AgentState(**raw)
         assert st.agent_trace == ["extractor", "retriever", "reviewer", "negotiator"]

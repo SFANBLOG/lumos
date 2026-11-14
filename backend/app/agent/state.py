@@ -11,8 +11,16 @@ Verifier 发送复核结论 (rework/handoff), 图中的条件边据此动态路�
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field
 
+from app.agent.reducers import (
+    append_errors,
+    append_events,
+    append_messages,
+    append_trace,
+)
 from app.models.analysis import RiskCategory, RiskLevel
 from app.schemas.analysis import SSEEvent
 from app.schemas.review import ContractFact, MissingClause
@@ -156,17 +164,28 @@ class AgentState(BaseModel):
 
     # ── 流程控制 ──
     current_node: str = Field(default="", description="当前执行的节点名称")
-    errors: list[str] = Field(default_factory=list, description="错误信息收集")
+    # 以下四个字段带追加归并器: 节点只返回本次新增条目, 由 LangGraph 累加,
+    # 返工 / 多节点写同一字段时不会互相覆盖, 也不会重复累加。
+    errors: Annotated[list[str], append_errors] = Field(
+        default_factory=list, description="错误信息收集"
+    )
     # AI 大模型不可用 (Key 无效/额度不足/网络故障) 时置 True:
     # 上层据此拒绝产出「已完成/低风险」报告, 避免把未完成的审查误报为安全
     ai_degraded: bool = Field(default=False, description="AI 模型不可用导致审查降级")
-    agent_trace: list[str] = Field(
+    agent_trace: Annotated[list[str], append_trace] = Field(
         default_factory=list,
         description="已执行的子智能体名称列表 (执行轨迹, 含返工重复执行)",
     )
+    review_decision: str = Field(default="", description="人工复核门结论: approved / rejected")
+    # 累计产生的事件总数: 单调游标, 不受 events 窗口裁剪影响, SSE 回放依赖它
+    event_count: int = Field(default=0, ge=0, description="累计产生的 SSE 事件数")
+    # 长期记忆召回的审查提示 (由 Reviewer 参考, 不含合同原文)
+    memory_hints: list[str] = Field(
+        default_factory=list, description="跨任务记忆召回的审查提示"
+    )
 
     # ── 多智能体协作 ──
-    agent_messages: list[AgentMessage] = Field(
+    agent_messages: Annotated[list[AgentMessage], append_messages] = Field(
         default_factory=list,
         description="智能体间消息总线 (任务分派 / 结果广播 / 复核返工 / 交接)",
     )
@@ -181,8 +200,8 @@ class AgentState(BaseModel):
     )
 
     # LangGraph 节点执行期间产生的事件 (NODE_START/THINKING/NODE_COMPLETE/RISK_FOUND),
-    # 由 run_contract_analysis 回放为 SSE 帧
-    events: list[SSEEvent] = Field(
+    # 由 run_contract_analysis 回放为 SSE 帧; 追加归并器保证跨节点 / 跨返工不丢事件
+    events: Annotated[list[SSEEvent], append_events] = Field(
         default_factory=list,
         description="工作流事件累积 (供 SSE 回放与测试断言)",
     )

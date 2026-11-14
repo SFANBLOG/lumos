@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Query, status
 from sqlmodel import select
 
+from app.agent.memory import record_feedback
 from app.api.deps import DBSession, get_current_user
 from app.models.analysis import RiskItem
 from app.models.review import RiskFeedback
@@ -76,6 +77,14 @@ async def submit_feedback(
     )
     await session.commit()
     await session.refresh(row)
+    # 反馈回流到 Agent 长期记忆: 误报统计用于后续审查抑制同类误判
+    risk = await session.get(RiskItem, body.risk_item_id)
+    if risk is not None:
+        record_feedback(
+            str(getattr(risk.category, "value", risk.category)),
+            body.verdict.value,
+            user_id=str(user_id or ""),
+        )
     return row
 
 
